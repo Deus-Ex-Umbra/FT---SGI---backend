@@ -1,0 +1,23 @@
+{
+    "productName": "SGD App",
+    "version": "0.1.0",
+    "identifier": "com.sgd.app",
+    "build": {
+        "frontendDist": "../frontend/dist",
+        "devUrl": "http://localhost:5173",
+        "beforeDevCommand": "npm run dev",
+        "beforeBuildCommand": "npm run build"
+    },
+    "app": {
+        "windows": [
+            {
+                "title": "SGD App",
+                "width": 1280,
+                "height": 720
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    }
+}
