@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, DeleteDateColumn } from 'typeorm';
 import { PrestamoEntidad } from './prestamo.entidad';
 
 @Entity('docentes')
@@ -20,6 +20,9 @@ export class DocenteEntidad {
 
   @Column({ length: 30, unique: true })
   carnet!: string;
+
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
+  deletedAt?: Date | null;
 
   @OneToMany(() => PrestamoEntidad, (prestamo: PrestamoEntidad) => prestamo.docente)
   prestamos!: PrestamoEntidad[];

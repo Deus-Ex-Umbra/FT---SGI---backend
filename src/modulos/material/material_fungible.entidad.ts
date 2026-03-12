@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, OneToMany, DeleteDateColumn } from 'typeorm';
 import { ContenedorMaterial } from './contenedor_material.entidad';
 import { LoteMaterial } from './lote_material.entidad';
 
@@ -28,6 +28,9 @@ export class MaterialFungible {
 
     @CreateDateColumn({ type: 'timestamp', name: 'created_at' })
     createdAt!: Date;
+
+    @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
+    deletedAt?: Date | null;
 
     @OneToMany(() => LoteMaterial, (lote: LoteMaterial) => lote.material)
     lotes!: LoteMaterial[];

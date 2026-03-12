@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, DeleteDateColumn } from 'typeorm';
 import { MaterialFungible } from './material_fungible.entidad';
 
 @Entity('contenedores_materiales')
@@ -14,6 +14,9 @@ export class ContenedorMaterial {
 
     @CreateDateColumn({ type: 'timestamp', name: 'created_at' })
     createdAt!: Date;
+
+    @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
+    deletedAt?: Date | null;
 
     @OneToMany(() => MaterialFungible, (material: MaterialFungible) => material.contenedor)
     materiales!: MaterialFungible[];

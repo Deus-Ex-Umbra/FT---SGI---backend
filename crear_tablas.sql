@@ -1,7 +1,17 @@
-CREATE TABLE IF NOT EXISTS activos_fijos (
+CREATE TABLE IF NOT EXISTS contenedores_activos (
     id SERIAL PRIMARY KEY,
     nombre VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ubicacion VARCHAR(150) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS activos_fijos (
+    id SERIAL PRIMARY KEY,
+    id_contenedor INTEGER NULL REFERENCES contenedores_activos(id) ON DELETE SET NULL,
+    nombre VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS items_activos (
@@ -13,14 +23,16 @@ CREATE TABLE IF NOT EXISTS items_activos (
     estado VARCHAR(30) NOT NULL DEFAULT 'buen_estado', -- 'buen_estado', 'regular', 'danado', 'en_mantenimiento'
     observaciones TEXT,
     precio NUMERIC(10, 2) DEFAULT 0.00,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS contenedores_materiales (
     id SERIAL PRIMARY KEY,
     nombre VARCHAR(100) NOT NULL,
     ubicacion VARCHAR(150) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS materiales_fungibles (
@@ -31,7 +43,8 @@ CREATE TABLE IF NOT EXISTS materiales_fungibles (
     descripcion TEXT,
     unidad VARCHAR(20) NOT NULL, -- Ej. Litros, Piezas, Cajas
     stock_minimo INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS lotes_materiales (
@@ -43,7 +56,8 @@ CREATE TABLE IF NOT EXISTS lotes_materiales (
     cantidad_disponible INTEGER DEFAULT 0,
     fecha_caducidad DATE NULL,
     precio NUMERIC(10, 2) DEFAULT 0.00,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS movimientos_materiales (
@@ -63,7 +77,8 @@ CREATE TABLE IF NOT EXISTS estudiantes (
     apellido VARCHAR(80) NOT NULL,
     carrera VARCHAR(120) NOT NULL,
     semestre INTEGER NOT NULL,
-    carnet_retenido BOOLEAN NOT NULL DEFAULT FALSE
+    carnet_retenido BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS docentes (
@@ -72,7 +87,8 @@ CREATE TABLE IF NOT EXISTS docentes (
     nombre VARCHAR(80) NOT NULL,
     apellido VARCHAR(80) NOT NULL,
     materia VARCHAR(80) NOT NULL,
-    carnet VARCHAR(30) UNIQUE NOT NULL
+    carnet VARCHAR(30) UNIQUE NOT NULL,
+    deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS prestamos (
@@ -81,22 +97,13 @@ CREATE TABLE IF NOT EXISTS prestamos (
     id_docente INTEGER NOT NULL REFERENCES docentes(id) ON DELETE RESTRICT,
     id_item_activo INTEGER NULL REFERENCES items_activos(id) ON DELETE SET NULL,
     codigo_herramienta VARCHAR(50) NOT NULL,
+    grupo_canasta VARCHAR(80) NULL,
     fecha_prestamo TIMESTAMP NOT NULL,
     fecha_devolucion TIMESTAMP NULL,
     estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
     observaciones TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS auditoria_eventos (
-    id SERIAL PRIMARY KEY,
-    entidad VARCHAR(80) NOT NULL,
-    entidad_id VARCHAR(80) NOT NULL,
-    accion VARCHAR(20) NOT NULL,
-    detalle JSONB NOT NULL,
-    hash_previo VARCHAR(64) NULL,
-    hash_actual VARCHAR(64) NOT NULL,
-    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
 );
 
 ALTER TABLE IF EXISTS prestamos
@@ -106,11 +113,46 @@ ALTER TABLE IF EXISTS prestamos
 -- Migración segura para bases existentes
 ALTER TABLE IF EXISTS items_activos
     ADD COLUMN IF NOT EXISTS fecha_entrega DATE NULL,
-    ADD COLUMN IF NOT EXISTS fecha_retiro DATE NULL;
+    ADD COLUMN IF NOT EXISTS fecha_retiro DATE NULL,
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+
+ALTER TABLE IF EXISTS activos_fijos
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL,
+    ADD COLUMN IF NOT EXISTS id_contenedor INTEGER NULL;
+
+CREATE TABLE IF NOT EXISTS contenedores_activos (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    ubicacion VARCHAR(150) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
+);
+
+ALTER TABLE IF EXISTS activos_fijos
+    DROP CONSTRAINT IF EXISTS fk_activos_fijos_contenedor,
+    ADD CONSTRAINT fk_activos_fijos_contenedor
+        FOREIGN KEY (id_contenedor) REFERENCES contenedores_activos(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS estudiantes
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+
+ALTER TABLE IF EXISTS docentes
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+
+ALTER TABLE IF EXISTS prestamos
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL,
+    ADD COLUMN IF NOT EXISTS grupo_canasta VARCHAR(80) NULL;
 
 ALTER TABLE IF EXISTS lotes_materiales
     ADD COLUMN IF NOT EXISTS fecha_entrega DATE NULL,
-    ADD COLUMN IF NOT EXISTS fecha_retiro DATE NULL;
+    ADD COLUMN IF NOT EXISTS fecha_retiro DATE NULL,
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+
+ALTER TABLE IF EXISTS contenedores_materiales
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+
+ALTER TABLE IF EXISTS materiales_fungibles
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
 
 ALTER TABLE IF EXISTS items_activos
     DROP CONSTRAINT IF EXISTS chk_items_activos_estado,
@@ -172,6 +214,12 @@ EXECUTE FUNCTION validar_transicion_estado_item_activo();
 ALTER TABLE IF EXISTS estudiantes
     ADD COLUMN IF NOT EXISTS carnet_retenido BOOLEAN NOT NULL DEFAULT FALSE;
 
+ALTER TABLE IF EXISTS prestamos
+    DROP CONSTRAINT IF EXISTS chk_prestamos_estado,
+    ADD CONSTRAINT chk_prestamos_estado CHECK (
+        estado IN ('activo', 'pendiente', 'devuelto', 'vencido', 'devuelto_fuera_de_fecha_limite')
+    );
+
 CREATE INDEX IF NOT EXISTS idx_prestamos_estado_fecha_devolucion
     ON prestamos (estado, fecha_devolucion);
 
@@ -181,36 +229,67 @@ CREATE INDEX IF NOT EXISTS idx_prestamos_id_estudiante
 CREATE INDEX IF NOT EXISTS idx_prestamos_codigo_herramienta
     ON prestamos (codigo_herramienta);
 
+CREATE INDEX IF NOT EXISTS idx_prestamos_grupo_canasta
+    ON prestamos (grupo_canasta)
+    WHERE grupo_canasta IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_materiales_referencia
+    ON movimientos_materiales (referencia)
+    WHERE referencia IS NOT NULL;
+
+UPDATE prestamos
+SET codigo_herramienta = id_item_activo::text
+WHERE id_item_activo IS NOT NULL
+    AND deleted_at IS NULL
+    AND codigo_herramienta <> id_item_activo::text;
+
+-- Corrige datos heredados: si hay más de un préstamo no devuelto por item,
+-- conserva el más reciente y marca el resto como devuelto.
+WITH prestamos_no_devueltos AS (
+    SELECT
+        id,
+        codigo_herramienta,
+        ROW_NUMBER() OVER (
+            PARTITION BY codigo_herramienta
+            ORDER BY fecha_prestamo DESC, id DESC
+        ) AS rn
+    FROM prestamos
+        WHERE estado NOT IN ('devuelto', 'devuelto_fuera_de_fecha_limite')
+            AND deleted_at IS NULL
+), prestamos_duplicados AS (
+    SELECT id
+    FROM prestamos_no_devueltos
+    WHERE rn > 1
+)
+UPDATE prestamos p
+SET
+    deleted_at = NOW(),
+    observaciones = CASE
+        WHEN p.observaciones IS NULL OR BTRIM(p.observaciones) = ''
+            THEN '[AUTO] Prestamo descartado por deduplicacion de item con multiples prestamos no devueltos.'
+        ELSE p.observaciones || ' [AUTO] Prestamo descartado por deduplicacion de item con multiples prestamos no devueltos.'
+    END
+FROM prestamos_duplicados d
+WHERE p.id = d.id;
+
+DROP INDEX IF EXISTS uq_prestamos_item_no_devuelto;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_prestamos_item_no_devuelto
+    ON prestamos (codigo_herramienta)
+    WHERE estado NOT IN ('devuelto', 'devuelto_fuera_de_fecha_limite') AND deleted_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_estudiantes_carnet_retenido
     ON estudiantes (carnet_retenido);
-
-CREATE INDEX IF NOT EXISTS idx_auditoria_entidad_entidad_id
-    ON auditoria_eventos (entidad, entidad_id);
-
-CREATE INDEX IF NOT EXISTS idx_auditoria_fecha
-    ON auditoria_eventos (fecha);
 
 CREATE INDEX IF NOT EXISTS idx_movimientos_materiales_lote_fecha
     ON movimientos_materiales (id_lote, fecha);
 
-CREATE OR REPLACE FUNCTION bloquear_update_delete_auditoria_eventos()
-RETURNS trigger AS $$
-BEGIN
-    RAISE EXCEPTION 'La tabla auditoria_eventos es inmutable: solo se permiten inserts';
-END;
-$$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS trg_bloquear_update_auditoria_eventos ON auditoria_eventos;
-CREATE TRIGGER trg_bloquear_update_auditoria_eventos
-BEFORE UPDATE ON auditoria_eventos
-FOR EACH ROW
-EXECUTE FUNCTION bloquear_update_delete_auditoria_eventos();
-
 DROP TRIGGER IF EXISTS trg_bloquear_delete_auditoria_eventos ON auditoria_eventos;
-CREATE TRIGGER trg_bloquear_delete_auditoria_eventos
-BEFORE DELETE ON auditoria_eventos
-FOR EACH ROW
-EXECUTE FUNCTION bloquear_update_delete_auditoria_eventos();
+DROP FUNCTION IF EXISTS bloquear_update_delete_auditoria_eventos();
+DROP INDEX IF EXISTS idx_auditoria_entidad_entidad_id;
+DROP INDEX IF EXISTS idx_auditoria_fecha;
+DROP TABLE IF EXISTS auditoria_eventos;
 
 -- Semillas mínimas de demostración (excepto usuarios)
 INSERT INTO activos_fijos (nombre)
@@ -329,29 +408,48 @@ SELECT
         e.id,
         d.id,
         ia.id,
-        'S01',
-        TIMESTAMP '2026-03-01 08:00:00',
-        NULL,
-        'pendiente',
-        'Para practica de automatizacion'
+        ia.id::text,
+        TIMESTAMP '2026-03-10 08:00:00',
+        TIMESTAMP '2026-03-20 18:00:00',
+        'activo',
+        '[EJEMPLO SGI] Prestamo activo de laboratorio'
 FROM estudiantes e
 JOIN docentes d ON d.codigo = 'DOC-001'
 LEFT JOIN items_activos ia ON ia.codigo_inventario = 'ACT-TEST-001'
 WHERE e.carnet = '2021-15430'
-    AND NOT EXISTS (SELECT 1 FROM prestamos WHERE codigo_herramienta = 'S01' AND fecha_prestamo = TIMESTAMP '2026-03-01 08:00:00');
+    AND ia.id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM prestamos WHERE codigo_herramienta = ia.id::text AND fecha_prestamo = TIMESTAMP '2026-03-10 08:00:00' AND deleted_at IS NULL);
 
 INSERT INTO prestamos (id_estudiante, id_docente, id_item_activo, codigo_herramienta, fecha_prestamo, fecha_devolucion, estado, observaciones)
 SELECT
         e.id,
         d.id,
         ia.id,
-        'S03',
+        ia.id::text,
         TIMESTAMP '2026-02-25 09:30:00',
-        NULL,
+        TIMESTAMP '2026-03-01 09:30:00',
         'vencido',
-        'No devolvio en fecha acordada'
+        '[EJEMPLO SGI] Prestamo vencido para seguimiento'
 FROM estudiantes e
 JOIN docentes d ON d.codigo = 'DOC-003'
 LEFT JOIN items_activos ia ON ia.codigo_inventario = 'ACT-TEST-002'
 WHERE e.carnet = '2022-08712'
-    AND NOT EXISTS (SELECT 1 FROM prestamos WHERE codigo_herramienta = 'S03' AND fecha_prestamo = TIMESTAMP '2026-02-25 09:30:00');
+    AND ia.id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM prestamos WHERE codigo_herramienta = ia.id::text AND fecha_prestamo = TIMESTAMP '2026-02-25 09:30:00' AND deleted_at IS NULL);
+
+INSERT INTO prestamos (id_estudiante, id_docente, id_item_activo, codigo_herramienta, fecha_prestamo, fecha_devolucion, estado, observaciones)
+SELECT
+        e.id,
+        d.id,
+        ia.id,
+        ia.id::text,
+        TIMESTAMP '2026-02-10 10:00:00',
+        TIMESTAMP '2026-02-12 10:00:00',
+        'devuelto',
+        '[EJEMPLO SGI] Prestamo historico devuelto'
+FROM estudiantes e
+JOIN docentes d ON d.codigo = 'DOC-002'
+LEFT JOIN items_activos ia ON ia.codigo_inventario = 'ACT-TEST-001'
+WHERE e.carnet = '2020-33891'
+    AND ia.id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM prestamos WHERE codigo_herramienta = ia.id::text AND fecha_prestamo = TIMESTAMP '2026-02-10 10:00:00' AND deleted_at IS NULL);

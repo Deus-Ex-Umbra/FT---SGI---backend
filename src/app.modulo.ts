@@ -6,6 +6,7 @@ import { UsuarioModulo } from './modulos/usuario/usuario.modulo';
 import { AutenticacionModulo } from './modulos/autenticacion/autenticacion.modulo';
 import { Usuario } from './modulos/usuario/usuario.entidad';
 import { ActivoModulo } from './modulos/activo/activo.modulo';
+import { ContenedorActivo } from './modulos/activo/contenedor_activo.entidad';
 import { ActivoFijo } from './modulos/activo/activo_fijo.entidad';
 import { ItemActivo } from './modulos/activo/item_activo.entidad';
 import { ContenedorMaterial } from './modulos/material/contenedor_material.entidad';
@@ -18,8 +19,6 @@ import { PrestamoModulo } from './modulos/prestamo/prestamo.modulo';
 import { PrestamoEntidad } from './modulos/prestamo/prestamo.entidad';
 import { EstudianteEntidad } from './modulos/prestamo/estudiante.entidad';
 import { DocenteEntidad } from './modulos/prestamo/docente.entidad';
-import { AuditoriaEventoEntidad } from './modulos/auditoria/auditoria.entidad';
-import { AuditoriaModulo } from './modulos/auditoria/auditoria.modulo';
 
 const envBool = (value: string | undefined, defaultValue: boolean): boolean => {
   if (value == null || value.trim() === '') return defaultValue;
@@ -44,6 +43,7 @@ const envBool = (value: string | undefined, defaultValue: boolean): boolean => {
             url: databaseUrl,
             entities: [
               Usuario,
+              ContenedorActivo,
               ActivoFijo,
               ItemActivo,
               ContenedorMaterial,
@@ -53,7 +53,6 @@ const envBool = (value: string | undefined, defaultValue: boolean): boolean => {
               PrestamoEntidad,
               EstudianteEntidad,
               DocenteEntidad,
-              AuditoriaEventoEntidad,
             ],
             synchronize,
             logging,
@@ -69,6 +68,7 @@ const envBool = (value: string | undefined, defaultValue: boolean): boolean => {
           database: process.env.DB_DATABASE ?? 'siyp',
           entities: [
             Usuario,
+            ContenedorActivo,
             ActivoFijo,
             ItemActivo,
             ContenedorMaterial,
@@ -78,7 +78,6 @@ const envBool = (value: string | undefined, defaultValue: boolean): boolean => {
             PrestamoEntidad,
             EstudianteEntidad,
             DocenteEntidad,
-            AuditoriaEventoEntidad,
           ],
           synchronize,
           logging,
@@ -90,7 +89,6 @@ const envBool = (value: string | undefined, defaultValue: boolean): boolean => {
     ActivoModulo,
     MaterialModulo,
     PrestamoModulo,
-    AuditoriaModulo,
   ],
   controllers: [HealthControlador],
   providers: [SeedServicio],

@@ -10,6 +10,11 @@ export class PrestamoControlador {
     return this.prestamoServicio.obtenerPrestamos();
   }
 
+  @Get('canastas')
+  async obtenerCanastas() {
+    return this.prestamoServicio.obtenerCanastasPrestamo();
+  }
+
   @Post()
   async crearPrestamo(
     @Body()
@@ -52,7 +57,7 @@ export class PrestamoControlador {
       fechaDevolucion: string | null;
       observaciones: string;
       idDocente: number;
-      estado: 'pendiente' | 'devuelto' | 'vencido';
+      estado: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite';
     }>,
   ) {
     return this.prestamoServicio.editarPrestamo(id, body);
@@ -69,6 +74,47 @@ export class PrestamoControlador {
   @Post(':id/devolver')
   async devolverPrestamo(@Param('id', ParseIntPipe) id: number) {
     return this.prestamoServicio.marcarDevuelto(id);
+  }
+
+  @Delete(':id')
+  async eliminarPrestamo(@Param('id', ParseIntPipe) id: number) {
+    await this.prestamoServicio.eliminarPrestamo(id);
+    return { ok: true };
+  }
+
+  @Put('canastas/:id')
+  async editarCanasta(
+    @Param('id') canastaId: string,
+    @Body()
+    body: Partial<{
+      carnetEstudiante: string;
+      fechaPrestamo: string;
+      fechaDevolucion: string | null;
+      observaciones: string;
+      idDocente: number;
+      estado: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite';
+    }>,
+  ) {
+    return this.prestamoServicio.editarCanastaPrestamo(canastaId, body);
+  }
+
+  @Post('canastas/:id/extender')
+  async extenderCanasta(
+    @Param('id') canastaId: string,
+    @Body() body: { fechaDevolucion: string },
+  ) {
+    return this.prestamoServicio.extenderCanastaPrestamo(canastaId, body.fechaDevolucion);
+  }
+
+  @Post('canastas/:id/devolver')
+  async devolverCanasta(@Param('id') canastaId: string) {
+    return this.prestamoServicio.devolverCanastaPrestamo(canastaId);
+  }
+
+  @Delete('canastas/:id')
+  async eliminarCanasta(@Param('id') canastaId: string) {
+    await this.prestamoServicio.eliminarCanastaPrestamo(canastaId);
+    return { ok: true };
   }
 
   @Get('estudiantes')

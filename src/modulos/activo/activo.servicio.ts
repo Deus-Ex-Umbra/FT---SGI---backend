@@ -1,20 +1,62 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ContenedorActivo } from './contenedor_activo.entidad';
 import { ActivoFijo } from './activo_fijo.entidad';
 import { ItemActivo } from './item_activo.entidad';
 import { TRANSICIONES_ESTADO_ITEM, normalizarEstadoItem, requiereJustificacionTransicion } from './reglas-estado-item';
-import { AuditoriaServicio } from '../auditoria/auditoria.servicio';
 
 @Injectable()
 export class ActivoServicio {
+    private readonly registrarEventoInterno = async (_input: unknown) => undefined;
+
     constructor(
+        @InjectRepository(ContenedorActivo)
+        private readonly contenedorActivoRepositorio: Repository<ContenedorActivo>,
         @InjectRepository(ActivoFijo)
         private readonly activoFijoRepositorio: Repository<ActivoFijo>,
         @InjectRepository(ItemActivo)
         private readonly itemActivoRepositorio: Repository<ItemActivo>,
-        private readonly auditoriaServicio: AuditoriaServicio,
     ) { }
+
+    private async obtenerContenedorPorId(idContenedor?: number): Promise<ContenedorActivo | null> {
+        if (!idContenedor) return null;
+        const contenedor = await this.contenedorActivoRepositorio.findOne({ where: { id: Number(idContenedor) } });
+        if (!contenedor) throw new NotFoundException('Contenedor de activos no encontrado.');
+        return contenedor;
+    }
+
+    async obtenerContenedores(): Promise<ContenedorActivo[]> {
+        return this.contenedorActivoRepositorio
+            .createQueryBuilder('ca')
+            .where('ca.deleted_at IS NULL')
+            .orderBy('ca.id', 'ASC')
+            .getMany();
+    }
+
+    async crearContenedor(datos: { nombre: string; ubicacion: string }): Promise<ContenedorActivo> {
+        const nombre = datos.nombre?.trim();
+        const ubicacion = datos.ubicacion?.trim();
+        if (!nombre || !ubicacion) {
+            throw new BadRequestException('Nombre y ubicación son obligatorios para crear contenedor.');
+        }
+        const contenedor = this.contenedorActivoRepositorio.create({ nombre, ubicacion });
+        return this.contenedorActivoRepositorio.save(contenedor);
+    }
+
+    async editarContenedor(id: number, datos: Partial<{ nombre: string; ubicacion: string }>): Promise<ContenedorActivo> {
+        const contenedor = await this.contenedorActivoRepositorio.findOne({ where: { id } });
+        if (!contenedor) throw new NotFoundException('Contenedor de activos no encontrado.');
+
+        if (typeof datos.nombre === 'string' && datos.nombre.trim()) {
+            contenedor.nombre = datos.nombre.trim();
+        }
+        if (typeof datos.ubicacion === 'string' && datos.ubicacion.trim()) {
+            contenedor.ubicacion = datos.ubicacion.trim();
+        }
+
+        return this.contenedorActivoRepositorio.save(contenedor);
+    }
 
     private validarTransicionEstado(item: ItemActivo, nuevoEstadoRaw: string, fechaRetiroNueva?: Date, justificacion?: string) {
         const estadoActual = normalizarEstadoItem(item.estado);
@@ -74,11 +116,91 @@ export class ActivoServicio {
     }
 
     async obtenerTodosFijos(): Promise<ActivoFijo[]> {
-        return await this.activoFijoRepositorio.find({ relations: ['items'] });
+        return await this.activoFijoRepositorio
+            .createQueryBuilder('af')
+            .leftJoinAndSelect('af.contenedor', 'ca', 'ca.deleted_at IS NULL')
+            .leftJoinAndSelect('af.items', 'it', 'it.deleted_at IS NULL')
+            .where('af.deleted_at IS NULL')
+            .getMany();
     }
 
     async obtenerItems(): Promise<ItemActivo[]> {
-        return await this.itemActivoRepositorio.find({ relations: ['activo'] });
+        return await this.itemActivoRepositorio
+            .createQueryBuilder('it')
+            .leftJoinAndSelect('it.activo', 'af', 'af.deleted_at IS NULL')
+            .where('it.deleted_at IS NULL')
+            .getMany();
+    }
+
+    async crearActivoFijo(datos: { nombre: string; idContenedor?: number }): Promise<ActivoFijo> {
+        const nombre = datos.nombre?.trim();
+        if (!nombre) {
+            throw new BadRequestException('El nombre del activo fijo es obligatorio.');
+        }
+
+        const contenedor = await this.obtenerContenedorPorId(datos.idContenedor);
+
+        const activo = this.activoFijoRepositorio.create({ nombre, contenedor });
+        const guardado = await this.activoFijoRepositorio.save(activo);
+        await this.registrarEventoInterno({
+            entidad: 'ActivoFijo',
+            entidadId: guardado.id,
+            accion: 'crear',
+            detalle: { id: guardado.id, nombre: guardado.nombre },
+        });
+        return guardado;
+    }
+
+    async crearItemActivo(
+        datos: {
+            idActivo: number;
+            codigoInventario: string;
+            fechaEntrega?: string | null;
+            fechaRetiro?: string | null;
+            estado?: string;
+            observaciones?: string;
+            precio?: number;
+        },
+    ): Promise<ItemActivo> {
+        const activo = await this.activoFijoRepositorio.findOne({ where: { id: Number(datos.idActivo) } });
+        if (!activo) {
+            throw new NotFoundException('Activo fijo no encontrado para asociar el item.');
+        }
+
+        const codigoInventario = datos.codigoInventario?.trim();
+        if (!codigoInventario) {
+            throw new BadRequestException('El código de inventario es obligatorio.');
+        }
+
+        const estadoNormalizado = normalizarEstadoItem(datos.estado ?? 'buen_estado');
+        if (!estadoNormalizado) {
+            throw new BadRequestException('Estado no válido para el item activo.');
+        }
+
+        const item = this.itemActivoRepositorio.create({
+            activo,
+            codigoInventario,
+            fechaEntrega: datos.fechaEntrega ? new Date(datos.fechaEntrega) : undefined,
+            fechaRetiro: datos.fechaRetiro ? new Date(datos.fechaRetiro) : undefined,
+            estado: estadoNormalizado,
+            observaciones: datos.observaciones?.trim() || '',
+            precio: Number(datos.precio ?? 0),
+        });
+
+        const guardado = await this.itemActivoRepositorio.save(item);
+        await this.registrarEventoInterno({
+            entidad: 'ItemActivo',
+            entidadId: guardado.id,
+            accion: 'crear',
+            detalle: {
+                id: guardado.id,
+                idActivo: activo.id,
+                codigoInventario: guardado.codigoInventario,
+                estado: guardado.estado,
+            },
+        });
+
+        return guardado;
     }
 
     async editarActivoFijo(id: number, datos: Partial<{ nombre: string }>): Promise<ActivoFijo> {
@@ -91,7 +213,7 @@ export class ActivoServicio {
         }
 
         const actualizado = await this.activoFijoRepositorio.save(activo);
-        await this.auditoriaServicio.registrarEventoSilencioso({
+        await this.registrarEventoInterno({
             entidad: 'ActivoFijo',
             entidadId: actualizado.id,
             accion: 'actualizar',
@@ -150,7 +272,7 @@ export class ActivoServicio {
         }
 
         const actualizado = await this.itemActivoRepositorio.save(item);
-        await this.auditoriaServicio.registrarEventoSilencioso({
+        await this.registrarEventoInterno({
             entidad: 'ItemActivo',
             entidadId: actualizado.id,
             accion: 'actualizar',
@@ -168,5 +290,27 @@ export class ActivoServicio {
             },
         });
         return actualizado;
+    }
+
+    async eliminarActivoFijo(id: number): Promise<void> {
+        const activo = await this.activoFijoRepositorio.findOne({ where: { id }, relations: ['items'] });
+        if (!activo) throw new NotFoundException('Activo fijo no encontrado.');
+
+        const items = activo.items ?? [];
+        if (items.length > 0) {
+            await this.itemActivoRepositorio.softRemove(items);
+        }
+
+        await this.activoFijoRepositorio.softRemove(activo);
+        await this.registrarEventoInterno({
+            entidad: 'ActivoFijo',
+            entidadId: activo.id,
+            accion: 'eliminar',
+            detalle: {
+                id: activo.id,
+                nombre: activo.nombre,
+                itemsDescartados: items.length,
+            },
+        });
     }
 }

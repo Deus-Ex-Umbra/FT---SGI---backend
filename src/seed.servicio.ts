@@ -38,7 +38,11 @@ export class SeedServicio {
 
     async seedDemo() {
         const seedForceRefresh = (process.env.SEED_FORCE_REFRESH ?? '').toLowerCase() === 'true';
-        const seedExistente = await this.prestamosRepo.findOne({ where: { codigoHerramienta: 'S01' } });
+        const seedExistente = await this.prestamosRepo
+            .createQueryBuilder('p')
+            .where("p.observaciones LIKE :marca", { marca: '[EJEMPLO SGI]%' })
+            .andWhere('p.deleted_at IS NULL')
+            .getOne();
         if (seedExistente && !seedForceRefresh) {
             this.logger.log('Seed demo omitido: datos ya existen.');
             return;
@@ -193,13 +197,15 @@ export class SeedServicio {
         const ensurePrestamo = async (
             carnetEstudiante: string,
             codigoDocente: string,
-            codigoHerramienta: string,
+            itemActivo: ItemActivo | null,
             fechaPrestamo: string,
             fechaDevolucion: string | null,
             estado: string,
             observaciones: string,
-            itemActivo: ItemActivo | null,
         ) => {
+            if (!itemActivo) return;
+            const codigoHerramienta = String(itemActivo.id);
+
             const prestamo = await this.prestamosRepo.findOne({
                 where: {
                     codigoHerramienta,
@@ -239,9 +245,9 @@ export class SeedServicio {
             }));
         };
 
-        await ensurePrestamo(est1.carnet, doc1.codigo, 'S01', '2026-03-01T08:00:00', null, 'pendiente', 'Para practica de automatizacion', itemA ?? null);
-        await ensurePrestamo(est2.carnet, doc3.codigo, 'S03', '2026-02-25T09:30:00', null, 'vencido', 'No devolvio en fecha acordada', itemB ?? null);
-        await ensurePrestamo(est1.carnet, doc2.codigo, 'S05', '2026-02-28T10:00:00', '2026-03-02T10:00:00', 'devuelto', '', itemB ?? null);
+        await ensurePrestamo(est1.carnet, doc1.codigo, itemA ?? null, '2026-03-10T08:00:00', '2026-03-20T18:00:00', 'activo', '[EJEMPLO SGI] Prestamo activo de laboratorio');
+        await ensurePrestamo(est2.carnet, doc3.codigo, itemB ?? null, '2026-02-25T09:30:00', '2026-03-01T09:30:00', 'vencido', '[EJEMPLO SGI] Prestamo vencido para seguimiento');
+        await ensurePrestamo(est2.carnet, doc2.codigo, itemA ?? null, '2026-02-10T10:00:00', '2026-02-12T10:00:00', 'devuelto', '[EJEMPLO SGI] Prestamo historico devuelto');
 
         this.logger.log('Seed demo aplicado (activos/materiales/prestamos)');
     }
