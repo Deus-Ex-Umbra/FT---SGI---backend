@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ContenedorMaterial } from './contenedor_material.entidad';
-import { MaterialFungible } from './material_fungible.entidad';
-import { LoteMaterial } from './lote_material.entidad';
-import { MovimientoMaterial } from './movimiento_material.entidad';
+import { ContenedorMaterial } from './entidades/contenedor_material.entidad';
+import { MaterialFungible } from './entidades/material_fungible.entidad';
+import { LoteMaterial } from './entidades/lote_material.entidad';
+import { MovimientoMaterial } from './entidades/movimiento_material.entidad';
 import { MaterialServicio } from './material.servicio';
 import { MaterialControlador } from './material.controlador';
 

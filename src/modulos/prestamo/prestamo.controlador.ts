@@ -5,6 +5,54 @@ import { PrestamoServicio } from './prestamo.servicio';
 export class PrestamoControlador {
   constructor(private readonly prestamoServicio: PrestamoServicio) {}
 
+  @Get('materias')
+  async obtenerMaterias() {
+    return this.prestamoServicio.obtenerMaterias();
+  }
+
+  @Post('materias')
+  async crearMateria(@Body() body: { codigo: string; nombre?: string | null }) {
+    return this.prestamoServicio.crearMateria(body);
+  }
+
+  @Put('materias/:id')
+  async editarMateria(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Partial<{ codigo: string; nombre: string | null }>,
+  ) {
+    return this.prestamoServicio.editarMateria(id, body);
+  }
+
+  @Delete('materias/:id')
+  async eliminarMateria(@Param('id', ParseIntPipe) id: number) {
+    await this.prestamoServicio.eliminarMateria(id);
+    return { ok: true };
+  }
+
+  @Get('carreras')
+  async obtenerCarreras() {
+    return this.prestamoServicio.obtenerCarreras();
+  }
+
+  @Post('carreras')
+  async crearCarrera(@Body() body: { nombre: string }) {
+    return this.prestamoServicio.crearCarrera(body);
+  }
+
+  @Put('carreras/:id')
+  async editarCarrera(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Partial<{ nombre: string }>,
+  ) {
+    return this.prestamoServicio.editarCarrera(id, body);
+  }
+
+  @Delete('carreras/:id')
+  async eliminarCarrera(@Param('id', ParseIntPipe) id: number) {
+    await this.prestamoServicio.eliminarCarrera(id);
+    return { ok: true };
+  }
+
   @Get()
   async obtenerPrestamos() {
     return this.prestamoServicio.obtenerPrestamos();
@@ -34,13 +82,14 @@ export class PrestamoControlador {
   async crearCanastaPrestamo(
     @Body()
     body: {
-      carnetEstudiante: string;
+      carnetEstudiante?: string;
+      carnetsEstudiantes?: string[];
       idDocente: number;
       fechaPrestamo: string;
       fechaDevolucion: string;
       observaciones?: string;
       equipos: string[];
-      consumibles: Array<{ idLote: number; cantidad: number; motivo: string }>;
+      consumibles: Array<{ idLote: string; cantidad: number; motivo: string }>;
     },
   ) {
     return this.prestamoServicio.crearCanastaPrestamo(body);
@@ -88,6 +137,7 @@ export class PrestamoControlador {
     @Body()
     body: Partial<{
       carnetEstudiante: string;
+      carnetsEstudiantes: string[];
       fechaPrestamo: string;
       fechaDevolucion: string | null;
       observaciones: string;
@@ -124,7 +174,16 @@ export class PrestamoControlador {
 
   @Post('estudiantes')
   async crearEstudiante(
-    @Body() body: { carnet: string; nombre: string; apellido: string; carrera: string; semestre: number; carnetRetenido?: boolean },
+    @Body()
+    body: {
+      carnet: string;
+      nombre: string;
+      apellido: string;
+      carrera: string;
+      semestre: number;
+      carnetRetenido?: boolean;
+      carnetRetenidoOverride?: boolean | null;
+    },
   ) {
     return this.prestamoServicio.crearEstudiante(body);
   }
@@ -132,7 +191,16 @@ export class PrestamoControlador {
   @Put('estudiantes/:id')
   async editarEstudiante(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Partial<{ carnet: string; nombre: string; apellido: string; carrera: string; semestre: number; carnetRetenido: boolean }>,
+    @Body()
+    body: Partial<{
+      carnet: string;
+      nombre: string;
+      apellido: string;
+      carrera: string;
+      semestre: number;
+      carnetRetenido: boolean;
+      carnetRetenidoOverride: boolean | null;
+    }>,
   ) {
     return this.prestamoServicio.editarEstudiante(id, body);
   }
@@ -150,7 +218,7 @@ export class PrestamoControlador {
 
   @Post('docentes')
   async crearDocente(
-    @Body() body: { codigo: string; nombre: string; apellido: string; materia: string; carnet: string },
+    @Body() body: { codigo: string; nombre: string; apellido: string; materia: string; carnet: string; materias?: string[]; materiasIds?: number[] },
   ) {
     return this.prestamoServicio.crearDocente(body);
   }
@@ -158,7 +226,7 @@ export class PrestamoControlador {
   @Put('docentes/:id')
   async editarDocente(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Partial<{ codigo: string; nombre: string; apellido: string; materia: string; carnet: string }>,
+    @Body() body: Partial<{ codigo: string; nombre: string; apellido: string; materia: string; carnet: string; materias?: string[]; materiasIds?: number[] }>,
   ) {
     return this.prestamoServicio.editarDocente(id, body);
   }

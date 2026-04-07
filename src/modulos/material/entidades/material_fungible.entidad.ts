@@ -7,9 +7,10 @@ export class MaterialFungible {
     @PrimaryGeneratedColumn()
     id!: number;
 
-    @ManyToOne(() => ContenedorMaterial, contenedor => contenedor.materiales, { onDelete: 'CASCADE' })
+    // Legacy: antes el material vivía dentro de un contenedor. Ahora el contenedor se asocia a cada instancia.
+    @ManyToOne(() => ContenedorMaterial, contenedor => contenedor.materiales, { onDelete: 'SET NULL', nullable: true })
     @JoinColumn({ name: 'id_contenedor' })
-    contenedor!: ContenedorMaterial;
+    contenedor?: ContenedorMaterial | null;
 
     @Column({ length: 100 })
     nombre!: string;
@@ -21,10 +22,16 @@ export class MaterialFungible {
     descripcion?: string;
 
     @Column({ length: 20 })
-    unidad!: string; // Ej. Litros, Piezas, Cajas
+    unidad!: string;
+
+    @Column({ name: 'stock_minimo_habilitado', type: 'boolean', default: false })
+    stockMinimoHabilitado!: boolean;
 
     @Column({ name: 'stock_minimo', type: 'int', default: 0 })
     stockMinimo!: number;
+
+    @Column({ name: 'tipo_identificacion', type: 'varchar', length: 12, default: 'lote' })
+    tipoIdentificacion!: 'lote' | 'serie' | 'simple';
 
     @CreateDateColumn({ type: 'timestamp', name: 'created_at' })
     createdAt!: Date;

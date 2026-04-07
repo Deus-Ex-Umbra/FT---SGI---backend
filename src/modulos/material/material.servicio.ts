@@ -1,10 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ContenedorMaterial } from './contenedor_material.entidad';
-import { MaterialFungible } from './material_fungible.entidad';
-import { LoteMaterial } from './lote_material.entidad';
-import { MovimientoMaterial } from './movimiento_material.entidad';
+import { In, IsNull, Repository } from 'typeorm';
+import { ContenedorMaterial } from './entidades/contenedor_material.entidad';
+import { MaterialFungible } from './entidades/material_fungible.entidad';
+import { LoteMaterial } from './entidades/lote_material.entidad';
+import { MovimientoMaterial } from './entidades/movimiento_material.entidad';
 
 @Injectable()
 export class MaterialServicio {
@@ -20,16 +20,23 @@ export class MaterialServicio {
     ) { }
 
     async obtenerContenedores(): Promise<ContenedorMaterial[]> {
-        return await this.contenedorRepositorio.find({ relations: ['materiales'] });
+        return await this.contenedorRepositorio.find({ where: { deletedAt: IsNull() }, order: { id: 'ASC' } });
     }
 
-    // "Caja" en el contexto de la aplicación, guardado como MaterialFungible
     async obtenerCajas(): Promise<MaterialFungible[]> {
-        return await this.materialRepositorio.find({ relations: ['contenedor', 'lotes'] });
+        return await this.materialRepositorio.find({
+            where: { deletedAt: IsNull() },
+            relations: ['contenedor', 'lotes', 'lotes.contenedor'],
+            order: { id: 'ASC' },
+        });
     }
 
     async obtenerLotes(): Promise<LoteMaterial[]> {
-        return await this.loteRepositorio.find({ relations: ['material'] });
+        return await this.loteRepositorio.find({
+            where: { deletedAt: IsNull() },
+            relations: ['material', 'contenedor'],
+            order: { createdAt: 'ASC' },
+        });
     }
 
     async crearContenedor(datos: { nombre: string; ubicacion: string }): Promise<ContenedorMaterial> {
@@ -38,6 +45,15 @@ export class MaterialServicio {
         if (!nombre || !ubicacion) {
             throw new BadRequestException('Nombre y ubicación del contenedor son obligatorios.');
         }
+
+        const existente = await this.contenedorRepositorio
+            .createQueryBuilder('cm')
+            .where('cm.deleted_at IS NULL')
+            .andWhere('LOWER(TRIM(cm.nombre)) = LOWER(:nombre)', { nombre })
+            .andWhere('LOWER(TRIM(cm.ubicacion)) = LOWER(:ubicacion)', { ubicacion })
+            .getOne();
+
+        if (existente) return existente;
 
         const contenedor = this.contenedorRepositorio.create({ nombre, ubicacion });
         return this.contenedorRepositorio.save(contenedor);
@@ -57,35 +73,59 @@ export class MaterialServicio {
             contenedor.ubicacion = datos.ubicacion.trim();
         }
 
+        const duplicado = await this.contenedorRepositorio
+            .createQueryBuilder('cm')
+            .where('cm.deleted_at IS NULL')
+            .andWhere('cm.id <> :id', { id })
+            .andWhere('LOWER(TRIM(cm.nombre)) = LOWER(:nombre)', { nombre: contenedor.nombre })
+            .andWhere('LOWER(TRIM(cm.ubicacion)) = LOWER(:ubicacion)', { ubicacion: contenedor.ubicacion })
+            .getOne();
+
+        if (duplicado) {
+            throw new BadRequestException('Ya existe un contenedor de material con ese nombre y ubicación.');
+        }
+
         return this.contenedorRepositorio.save(contenedor);
     }
 
     async eliminarContenedor(id: number): Promise<void> {
-        const contenedor = await this.contenedorRepositorio.findOne({ where: { id }, relations: ['materiales', 'materiales.lotes'] });
+        const contenedor = await this.contenedorRepositorio.findOne({ where: { id, deletedAt: IsNull() } });
         if (!contenedor) throw new NotFoundException('Contenedor de material no encontrado.');
 
-        const materiales = contenedor.materiales ?? [];
-        const lotes = materiales.flatMap((material) => material.lotes ?? []);
+        // Con el modelo nuevo, el contenedor solo afecta a instancias (items) y no elimina el catálogo (materiales padre).
+        const instancias = await this.loteRepositorio.find({
+            where: { contenedor: { id }, deletedAt: IsNull() },
+            relations: ['material', 'contenedor'],
+        });
+        if (instancias.length > 0) {
+            await this.loteRepositorio.softRemove(instancias);
+        }
 
-        if (lotes.length > 0) {
-            await this.loteRepositorio.softRemove(lotes);
+        // Desasignar cualquier material legacy que aún apunte a este contenedor.
+        const materialesLegacy = await this.materialRepositorio.find({ where: { contenedor: { id }, deletedAt: IsNull() }, relations: ['contenedor'] });
+        if (materialesLegacy.length > 0) {
+            materialesLegacy.forEach((m) => (m.contenedor = null));
+            await this.materialRepositorio.save(materialesLegacy);
         }
-        if (materiales.length > 0) {
-            await this.materialRepositorio.softRemove(materiales);
-        }
+
         await this.contenedorRepositorio.softRemove(contenedor);
     }
 
     async crearCaja(datos: {
-        idContenedor: number;
+        idContenedor?: number;
         nombre: string;
         categoria?: string;
         descripcion?: string;
         unidad?: string;
+        stockMinimoHabilitado?: boolean;
         stockMinimo?: number;
+        tipoIdentificacion?: 'lote' | 'serie' | 'simple';
     }): Promise<MaterialFungible> {
-        const contenedor = await this.contenedorRepositorio.findOne({ where: { id: Number(datos.idContenedor) } });
-        if (!contenedor) {
+        const contenedor =
+            datos.idContenedor != null
+                ? await this.contenedorRepositorio.findOne({ where: { id: Number(datos.idContenedor), deletedAt: IsNull() } })
+                : null;
+        if (datos.idContenedor != null && !contenedor) {
             throw new NotFoundException('Contenedor de material no encontrado.');
         }
 
@@ -95,12 +135,14 @@ export class MaterialServicio {
         }
 
         const caja = this.materialRepositorio.create({
-            contenedor,
+            contenedor: contenedor ?? null,
             nombre,
             categoria: datos.categoria?.trim() || 'Fungible',
             descripcion: datos.descripcion?.trim() || '',
             unidad: datos.unidad?.trim() || 'Unidades',
+            stockMinimoHabilitado: Boolean(datos.stockMinimoHabilitado),
             stockMinimo: Number(datos.stockMinimo ?? 0),
+            tipoIdentificacion: datos.tipoIdentificacion ?? 'lote',
         });
 
         return this.materialRepositorio.save(caja);
@@ -108,7 +150,7 @@ export class MaterialServicio {
 
     async editarCaja(
         id: number,
-        datos: Partial<{ nombre: string; categoria: string; descripcion: string; unidad: string; stockMinimo: number }>,
+        datos: Partial<{ nombre: string; categoria: string; descripcion: string; unidad: string; stockMinimoHabilitado: boolean; stockMinimo: number; tipoIdentificacion: 'lote' | 'serie' | 'simple' }>,
     ): Promise<MaterialFungible> {
         const caja = await this.materialRepositorio.findOne({ where: { id }, relations: ['contenedor'] });
         if (!caja) throw new NotFoundException('Caja/material no encontrado.');
@@ -117,8 +159,12 @@ export class MaterialServicio {
         if (typeof datos.categoria === 'string' && datos.categoria.trim()) caja.categoria = datos.categoria.trim();
         if (typeof datos.descripcion === 'string') caja.descripcion = datos.descripcion.trim();
         if (typeof datos.unidad === 'string' && datos.unidad.trim()) caja.unidad = datos.unidad.trim();
+        if (typeof datos.stockMinimoHabilitado === 'boolean') caja.stockMinimoHabilitado = datos.stockMinimoHabilitado;
         if (typeof datos.stockMinimo === 'number' && Number.isFinite(datos.stockMinimo)) {
             caja.stockMinimo = Number(datos.stockMinimo);
+        }
+        if (typeof datos.tipoIdentificacion === 'string' && ['lote', 'serie', 'simple'].includes(datos.tipoIdentificacion)) {
+            caja.tipoIdentificacion = datos.tipoIdentificacion;
         }
 
         return this.materialRepositorio.save(caja);
@@ -137,7 +183,10 @@ export class MaterialServicio {
 
     async crearLote(datos: {
         idMaterial: number;
-        lote: string;
+        idContenedor: number;
+        tipo: 'lote' | 'serie' | 'simple';
+        lote?: string | null;
+        serie?: string | null;
         fechaEntrega?: string | null;
         fechaRetiro?: string | null;
         cantidadDisponible?: number;
@@ -149,14 +198,28 @@ export class MaterialServicio {
             throw new NotFoundException('Caja/material no encontrado.');
         }
 
-        const loteCodigo = datos.lote?.trim();
-        if (!loteCodigo) {
-            throw new BadRequestException('El código de lote es obligatorio.');
+        const contenedor = await this.contenedorRepositorio.findOne({ where: { id: Number(datos.idContenedor), deletedAt: IsNull() } });
+        if (!contenedor) {
+            throw new NotFoundException('Contenedor de material no encontrado.');
         }
+
+        const tipo = datos.tipo;
+        if (!['lote', 'serie', 'simple'].includes(tipo)) {
+            throw new BadRequestException('Tipo de instancia inválido.');
+        }
+
+        const loteCodigo = (datos.lote ?? '')?.trim();
+        const serieCodigo = (datos.serie ?? '')?.trim();
+
+        if (tipo === 'lote' && !loteCodigo) throw new BadRequestException('El código de lote es obligatorio.');
+        if (tipo === 'serie' && !serieCodigo) throw new BadRequestException('El código de serie es obligatorio.');
 
         const lote = this.loteRepositorio.create({
             material,
-            lote: loteCodigo,
+            contenedor,
+            tipo,
+            lote: tipo === 'lote' ? loteCodigo : null,
+            serie: tipo === 'serie' ? serieCodigo : null,
             fechaEntrega: datos.fechaEntrega ? new Date(datos.fechaEntrega) : undefined,
             fechaRetiro: datos.fechaRetiro ? new Date(datos.fechaRetiro) : undefined,
             cantidadDisponible: Number(datos.cantidadDisponible ?? 0),
@@ -168,13 +231,37 @@ export class MaterialServicio {
     }
 
     async editarLote(
-        id: number,
-        datos: Partial<{ lote: string; fechaEntrega: string | null; fechaRetiro: string | null; cantidadDisponible: number; fechaCaducidad: string | null; precio: number }>,
+        id: string,
+        datos: Partial<{ tipo: 'lote' | 'serie' | 'simple'; lote: string | null; serie: string | null; fechaEntrega: string | null; fechaRetiro: string | null; cantidadDisponible: number; fechaCaducidad: string | null; precio: number }>,
     ): Promise<LoteMaterial> {
-        const lote = await this.loteRepositorio.findOne({ where: { id }, relations: ['material'] });
+        const lote = await this.loteRepositorio.findOne({ where: { id }, relations: ['material', 'contenedor'] });
         if (!lote) throw new NotFoundException('Lote no encontrado.');
 
-        if (typeof datos.lote === 'string' && datos.lote.trim()) lote.lote = datos.lote.trim();
+        if (typeof datos.tipo === 'string' && ['lote', 'serie', 'simple'].includes(datos.tipo)) {
+            lote.tipo = datos.tipo;
+        }
+
+        if (datos.lote !== undefined) {
+            const v = datos.lote == null ? '' : String(datos.lote);
+            lote.lote = v.trim() ? v.trim() : null;
+        }
+
+        if (datos.serie !== undefined) {
+            const v = datos.serie == null ? '' : String(datos.serie);
+            lote.serie = v.trim() ? v.trim() : null;
+        }
+
+        if (lote.tipo === 'lote' && !String(lote.lote ?? '').trim()) {
+            throw new BadRequestException('El código de lote es obligatorio.');
+        }
+        if (lote.tipo === 'serie' && !String(lote.serie ?? '').trim()) {
+            throw new BadRequestException('El código de serie es obligatorio.');
+        }
+        if (lote.tipo === 'simple') {
+            lote.lote = null;
+            lote.serie = null;
+        }
+
         if (datos.fechaEntrega !== undefined) lote.fechaEntrega = datos.fechaEntrega ? new Date(datos.fechaEntrega) : undefined;
         if (datos.fechaRetiro !== undefined) lote.fechaRetiro = datos.fechaRetiro ? new Date(datos.fechaRetiro) : undefined;
         if (typeof datos.cantidadDisponible === 'number' && Number.isFinite(datos.cantidadDisponible)) {
@@ -186,7 +273,7 @@ export class MaterialServicio {
         return this.loteRepositorio.save(lote);
     }
 
-    async eliminarLote(id: number): Promise<void> {
+    async eliminarLote(id: string): Promise<void> {
         const lote = await this.loteRepositorio.findOne({ where: { id } });
         if (!lote) throw new NotFoundException('Lote no encontrado.');
         await this.loteRepositorio.remove(lote);
@@ -194,9 +281,9 @@ export class MaterialServicio {
 
     async obtenerKardexMaterial(idMaterial: number) {
         const lotes = await this.loteRepositorio.find({
-            where: { material: { id: idMaterial } },
+            where: { material: { id: idMaterial }, deletedAt: IsNull() },
             relations: ['material'],
-            order: { id: 'ASC' },
+            order: { createdAt: 'ASC' },
         });
 
         if (lotes.length === 0) {
@@ -209,7 +296,7 @@ export class MaterialServicio {
 
         const idsLotes = lotes.map((l) => l.id);
         const movimientos = await this.movimientoRepositorio.find({
-            where: idsLotes.map((id) => ({ lote: { id } })),
+            where: { lote: { id: In(idsLotes) } },
             relations: ['lote', 'lote.material'],
             order: { fecha: 'ASC', id: 'ASC' },
         });
@@ -224,7 +311,7 @@ export class MaterialServicio {
                 cantidad: m.cantidad,
                 motivo: m.motivo,
                 referencia: m.referencia ?? '',
-                lote: m.lote?.lote ?? '',
+                lote: m.lote?.lote ?? m.lote?.serie ?? '',
             })),
         };
     }

@@ -1,37 +1,45 @@
 {
-  "name": "siyp-backend",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "build": "nest build",
-    "start": "node dist/main",
-    "start:dev": "nest start --watch",
-    "start:prod": "node dist/main",
-    "lint": "eslint \"src/**/*.ts\""
-  },
-  "dependencies": {
-    "@nestjs/common": "^11.0.1",
-    "@nestjs/config": "^4.0.2",
-    "@nestjs/core": "^11.0.1",
-    "@nestjs/jwt": "^11.0.2",
-    "@nestjs/passport": "^11.0.5",
-    "@nestjs/platform-express": "^11.0.1",
-    "@nestjs/typeorm": "^11.0.0",
-    "bcrypt": "^6.0.0",
-    "passport": "^0.7.0",
-    "passport-jwt": "^4.0.1",
-    "pg": "^8.16.3",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2",
-    "typeorm": "^0.3.26"
-  },
-  "devDependencies": {
-    "@nestjs/cli": "^11.0.0",
-    "@nestjs/schematics": "^11.0.0",
-    "@nestjs/testing": "^11.0.1",
-    "@types/bcrypt": "^6.0.0",
-    "@types/node": "^24.3.1",
-    "@types/passport-jwt": "^4.0.1",
-    "typescript": "^5.9.2"
-  }
+    "name": "siyp-backend",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "build": "nest build && tsc-alias -p tsconfig.build.json",
+        "start": "node dist/main",
+        "start:dev": "set \"NODE_OPTIONS=-r tsconfig-paths/register\"&& nest start --watch",
+        "start:prod": "node dist/main",
+        "lint": "eslint \"src/**/*.ts\"",
+        "seed": "npm run build && node dist/seed-runner.js",
+           "migrate:items-uuid": "npm run build && node dist/migrate-items-uuid.js",
+           "migrate:lotes-uuid": "npm run build && node dist/migrate-lotes-uuid.js"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.24.1",
+        "@nestjs/common": "^11.0.1",
+        "@nestjs/config": "^4.0.2",
+        "@nestjs/core": "^11.0.1",
+        "@nestjs/jwt": "^11.0.2",
+        "@nestjs/passport": "^11.0.5",
+        "@nestjs/platform-express": "^11.0.1",
+        "@nestjs/swagger": "^11.2.6",
+        "@nestjs/typeorm": "^11.0.0",
+        "bcrypt": "^6.0.0",
+        "passport": "^0.7.0",
+        "passport-jwt": "^4.0.1",
+        "pg": "^8.16.3",
+        "puppeteer": "^24.40.0",
+        "reflect-metadata": "^0.2.2",
+        "rxjs": "^7.8.2",
+        "typeorm": "^0.3.26"
+    },
+    "devDependencies": {
+        "@nestjs/cli": "^11.0.0",
+        "@nestjs/schematics": "^11.0.0",
+        "@nestjs/testing": "^11.0.1",
+        "@types/bcrypt": "^6.0.0",
+        "@types/node": "^24.3.1",
+        "@types/passport-jwt": "^4.0.1",
+        "tsc-alias": "^1.8.16",
+        "tsconfig-paths": "^4.2.0",
+        "typescript": "^5.9.2"
+    }
 }

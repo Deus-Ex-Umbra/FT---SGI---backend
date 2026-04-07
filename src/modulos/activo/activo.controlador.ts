@@ -1,99 +1,101 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { ActivoServicio } from './activo.servicio';
 
 @Controller('activos')
-// @UseGuards(JwtAutenticacionGuardia) // Descomentar para asegurar
 export class ActivoControlador {
-    constructor(private readonly activoServicio: ActivoServicio) { }
+    constructor(private readonly servicio: ActivoServicio) { }
 
     @Get('fijos')
-    async obtenerTodosFijos() {
-        return await this.activoServicio.obtenerTodosFijos();
-    }
-
-    @Get('items')
-    async obtenerItems() {
-        return await this.activoServicio.obtenerItems();
-    }
-
-    @Get('contenedores')
-    async obtenerContenedores() {
-        return this.activoServicio.obtenerContenedores();
-    }
-
-    @Post('contenedores')
-    async crearContenedor(
-        @Body() body: { nombre: string; ubicacion: string },
-    ) {
-        return this.activoServicio.crearContenedor(body);
+    obtenerFijos() {
+        return this.servicio.obtenerTodosFijos();
     }
 
     @Post('fijos')
-    async crearActivoFijo(
-        @Body() body: { nombre: string; idContenedor?: number },
+    crearActivoFijo(
+        @Body() body: { nombre: string; idContenedor?: number; categoria?: string; descripcion?: string },
     ) {
-        return this.activoServicio.crearActivoFijo(body);
-    }
-
-    @Put('contenedores/:id')
-    async editarContenedor(
-        @Param('id', ParseIntPipe) id: number,
-        @Body() body: Partial<{ nombre: string; ubicacion: string }>,
-    ) {
-        return this.activoServicio.editarContenedor(id, body);
-    }
-
-    @Post('items')
-    async crearItemActivo(
-        @Body()
-        body: {
-            idActivo: number;
-            codigoInventario: string;
-            fechaEntrega?: string | null;
-            fechaRetiro?: string | null;
-            estado?: string;
-            observaciones?: string;
-            precio?: number;
-        },
-    ) {
-        return this.activoServicio.crearItemActivo(body);
-    }
-
-    @Get('items/:id/transiciones-permitidas')
-    async obtenerTransicionesPermitidas(
-        @Param('id', ParseIntPipe) id: number,
-    ) {
-        return this.activoServicio.obtenerTransicionesPermitidas(id);
+        return this.servicio.crearActivoFijo(body);
     }
 
     @Put('fijos/:id')
-    async editarActivoFijo(
-        @Param('id', ParseIntPipe) id: number,
-        @Body() body: Partial<{ nombre: string }>,
+    editarActivoFijo(
+        @Param('id') id: string,
+        @Body() body: Partial<{ nombre: string; categoria: string; descripcion: string }>,
     ) {
-        return this.activoServicio.editarActivoFijo(id, body);
+        return this.servicio.editarActivoFijo(Number(id), body);
+    }
+
+    @Delete('fijos/:id')
+    eliminarActivoFijo(@Param('id') id: string) {
+        return this.servicio.eliminarActivoFijo(Number(id));
+    }
+
+    @Get('contenedores')
+    obtenerContenedores() {
+        return this.servicio.obtenerContenedores();
+    }
+
+    @Post('contenedores')
+    crearContenedor(@Body() body: { nombre: string; ubicacion: string }) {
+        return this.servicio.crearContenedor(body);
+    }
+
+    @Put('contenedores/:id')
+    editarContenedor(
+        @Param('id') id: string,
+        @Body() body: Partial<{ nombre: string; ubicacion: string }>,
+    ) {
+        return this.servicio.editarContenedor(Number(id), body);
+    }
+
+    @Post('items')
+    crearItem(@Body() body: {
+        idActivo: string | number;
+        codigoInventario?: string;
+        codigoUnico?: string;
+        codigoSistema?: string;
+        ubicacion?: string;
+        ue?: string;
+        descripcion?: string;
+        fechaEntrega?: string | null;
+        fechaRetiro?: string | null;
+        estado?: string;
+        estadoFisico?: string;
+        observaciones?: string;
+        precio?: number;
+    }) {
+        return this.servicio.crearItemActivo(body);
     }
 
     @Put('items/:id')
-    async editarItemActivo(
-        @Param('id', ParseIntPipe) id: number,
-        @Body()
-        body: Partial<{
+    editarItem(
+        @Param('id') id: string,
+        @Body() body: Partial<{
             codigoInventario: string;
+            codigoUnico: string;
+            codigoSistema: string;
             fechaEntrega: string | null;
             fechaRetiro: string | null;
             estado: string;
+            estadoFisico: string;
+            ubicacion: string;
+            ue: string;
+            descripcion: string;
             observaciones: string;
             precio: number;
             justificacion: string;
         }>,
     ) {
-        return this.activoServicio.editarItemActivo(id, body);
+        return this.servicio.editarItemActivo(id, body);
     }
 
-    @Delete('fijos/:id')
-    async eliminarActivoFijo(@Param('id', ParseIntPipe) id: number) {
-        await this.activoServicio.eliminarActivoFijo(id);
-        return { ok: true };
+    @Delete('items/:id')
+    eliminarItem(@Param('id') id: string) {
+        return this.servicio.eliminarItemActivo(id);
+    }
+
+    @Get('items/:id/transiciones-permitidas')
+    obtenerTransiciones(@Param('id') id: string) {
+        return this.servicio.obtenerTransicionesPermitidas(id);
     }
 }

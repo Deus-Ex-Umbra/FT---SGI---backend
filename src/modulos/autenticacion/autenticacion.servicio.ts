@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { UsuarioServicio } from '../usuario/usuario.servicio';
+import { UsuarioServicio } from '@/modulos/usuario/usuario.servicio';
 import { InicioSesionDto } from './dto/inicio-sesion.dto';
 
 @Injectable()

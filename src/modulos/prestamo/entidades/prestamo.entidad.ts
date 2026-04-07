@@ -1,7 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, Index, DeleteDateColumn } from 'typeorm';
 import { EstudianteEntidad } from './estudiante.entidad';
 import { DocenteEntidad } from './docente.entidad';
-import { ItemActivo } from '../activo/item_activo.entidad';
+import { ItemActivoFijo } from '@/modulos/activo/entidades/item-activo-fijo.entidad';
 
 @Entity('prestamos')
 @Index('idx_prestamos_estado_fecha_devolucion', ['estado', 'fechaDevolucion'])
@@ -19,9 +19,9 @@ export class PrestamoEntidad {
   @JoinColumn({ name: 'id_docente' })
   docente!: DocenteEntidad;
 
-  @ManyToOne(() => ItemActivo, { nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => ItemActivoFijo, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'id_item_activo' })
-  itemActivo?: ItemActivo | null;
+  itemActivo?: ItemActivoFijo | null;
 
   @Column({ name: 'codigo_herramienta', length: 50 })
   codigoHerramienta!: string;
@@ -35,7 +35,8 @@ export class PrestamoEntidad {
   @Column({ name: 'fecha_devolucion', type: 'timestamp', nullable: true })
   fechaDevolucion?: Date | null;
 
-  @Column({ length: 20, default: 'pendiente' })
+  // 20 chars no alcanza para estados como "devuelto_fuera_de_fecha_limite".
+  @Column({ length: 40, default: 'pendiente' })
   estado!: string;
 
   @Column({ type: 'text', nullable: true })

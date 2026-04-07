@@ -1,25 +1,45 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ActivoFijo } from './modulos/activo/activo_fijo.entidad';
-import { ItemActivo } from './modulos/activo/item_activo.entidad';
-import { ContenedorMaterial } from './modulos/material/contenedor_material.entidad';
-import { MaterialFungible } from './modulos/material/material_fungible.entidad';
-import { LoteMaterial } from './modulos/material/lote_material.entidad';
-import { MovimientoMaterial } from './modulos/material/movimiento_material.entidad';
-import { EstudianteEntidad } from './modulos/prestamo/estudiante.entidad';
-import { DocenteEntidad } from './modulos/prestamo/docente.entidad';
-import { PrestamoEntidad } from './modulos/prestamo/prestamo.entidad';
+import { ActivoFijo } from './modulos/activo/entidades/activo-fijo.entidad';
+import { ItemActivoFijo } from './modulos/activo/entidades/item-activo-fijo.entidad';
+import { ContenedorMaterial } from './modulos/material/entidades/contenedor_material.entidad';
+import { MaterialFungible } from './modulos/material/entidades/material_fungible.entidad';
+import { LoteMaterial } from './modulos/material/entidades/lote_material.entidad';
+import { MovimientoMaterial } from './modulos/material/entidades/movimiento_material.entidad';
+import { EstudianteEntidad } from './modulos/prestamo/entidades/estudiante.entidad';
+import { DocenteEntidad } from './modulos/prestamo/entidades/docente.entidad';
+import { PrestamoEntidad } from './modulos/prestamo/entidades/prestamo.entidad';
+import { SEED_ACTIVOS_FIJOS } from './seed/seed-activos-fijos';
 
 @Injectable()
 export class SeedServicio {
     private readonly logger = new Logger(SeedServicio.name);
 
+    private normalizarNombreActivo(nombreBase: string) {
+        const limpio = String(nombreBase ?? '').trim().replace(/\s+/g, ' ');
+        const MAX = 100;
+        if (limpio.length <= MAX) {
+            return { nombre: limpio, descripcion: null as string | null };
+        }
+
+        // Para no violar `varchar(100)`, recortamos y guardamos el texto completo en `descripcion`.
+        const target = MAX - 1; // reserva para elipsis
+        const slice = limpio.slice(0, target);
+        const lastPunct = Math.max(slice.lastIndexOf('.'), slice.lastIndexOf(';'), slice.lastIndexOf(','));
+        const lastSpace = slice.lastIndexOf(' ');
+        let cut = Math.max(lastPunct, lastSpace);
+        if (cut < 30) cut = target; // evita nombres absurdamente cortos
+
+        const nombre = `${slice.slice(0, cut).trimEnd()}…`;
+        return { nombre, descripcion: limpio };
+    }
+
     constructor(
         @InjectRepository(ActivoFijo)
         private readonly activosRepo: Repository<ActivoFijo>,
-        @InjectRepository(ItemActivo)
-        private readonly itemsRepo: Repository<ItemActivo>,
+        @InjectRepository(ItemActivoFijo)
+        private readonly itemsRepo: Repository<ItemActivoFijo>,
         @InjectRepository(ContenedorMaterial)
         private readonly contenedoresRepo: Repository<ContenedorMaterial>,
         @InjectRepository(MaterialFungible)
@@ -35,6 +55,130 @@ export class SeedServicio {
         @InjectRepository(PrestamoEntidad)
         private readonly prestamosRepo: Repository<PrestamoEntidad>,
     ) { }
+
+    async seedActivosFijos() {
+        const seedForceRefresh = (process.env.SEED_FORCE_REFRESH ?? '').toLowerCase() === 'true';
+
+        // Marcador simple de idempotencia: si ya existe al menos 1 item con alguno
+        // de los códigos del seeder, no re-insertamos a menos que se fuerce.
+        const primerCodigo = SEED_ACTIVOS_FIJOS.find((g) => g.items.length)?.items?.[0]?.codigoInventario ?? null;
+        if (primerCodigo && !seedForceRefresh) {
+            const existente = await this.itemsRepo.findOne({
+                where: { codigo_inventario: primerCodigo },
+                withDeleted: true,
+            });
+            if (existente) {
+                this.logger.log('Seed de activos fijos omitido: datos ya existen. (Usa SEED_FORCE_REFRESH=true para forzar)');
+                return;
+            }
+        }
+
+        this.logger.log(`Aplicando seed de activos fijos: ${SEED_ACTIVOS_FIJOS.length} grupos...`);
+
+        for (const grupo of SEED_ACTIVOS_FIJOS) {
+            const normalizado = this.normalizarNombreActivo(grupo.nombreBase);
+
+            // 1) Preferir encontrar el ActivoFijo vía un item existente del grupo (evita duplicados
+            // cuando la base ya tenía datos pero con nombre distinto/recortado).
+            const itemReferencia =
+                grupo.items.find((i) => i.codigoInventario) ??
+                grupo.items.find((i) => i.codigoSistema) ??
+                grupo.items.find((i) => i.codigoUnico) ??
+                null;
+            let activo: ActivoFijo | null = null;
+
+            if (itemReferencia) {
+                const existente = itemReferencia.codigoInventario
+                    ? await this.itemsRepo.findOne({ where: { codigo_inventario: itemReferencia.codigoInventario }, withDeleted: true, relations: ['activo'] })
+                    : itemReferencia.codigoSistema
+                        ? await this.itemsRepo.findOne({ where: { codigo_sistema: itemReferencia.codigoSistema }, withDeleted: true, relations: ['activo'] })
+                        : itemReferencia.codigoUnico
+                            ? await this.itemsRepo.findOne({ where: { codigo_unico: itemReferencia.codigoUnico }, withDeleted: true, relations: ['activo'] })
+                            : null;
+                activo = (existente?.activo as ActivoFijo) ?? null;
+            }
+
+            // 2) Fallback por (nombre,categoria) ya normalizado.
+            if (!activo) {
+                activo = await this.activosRepo.findOne({
+                    where: { nombre: normalizado.nombre, categoria: grupo.categoria },
+                    withDeleted: true,
+                });
+            }
+
+            if (!activo) {
+                activo = this.activosRepo.create({
+                    nombre: normalizado.nombre,
+                    categoria: grupo.categoria,
+                    descripcion: normalizado.descripcion ?? undefined,
+                });
+                activo = await this.activosRepo.save(activo);
+            } else {
+                // Mantiene el activo actualizado si cambiaron campos del seeder.
+                Object.assign(activo, {
+                    nombre: normalizado.nombre,
+                    categoria: grupo.categoria,
+                    descripcion: normalizado.descripcion ?? activo.descripcion ?? undefined,
+                });
+                activo = await this.activosRepo.save(activo);
+            }
+
+            for (const itemSeed of grupo.items) {
+                // Importante: evitar búsquedas OR con campos ambiguos (ej. `codigoUnico` repetido).
+                // Priorizamos claves fuertes para que el seed sea determinístico y no provoque colisiones
+                // en uniques (ej. `codigo_inventario`).
+                let item: ItemActivoFijo | null = null;
+                if (itemSeed.codigoInventario) {
+                    item = await this.itemsRepo.findOne({
+                        where: { codigo_inventario: itemSeed.codigoInventario },
+                        withDeleted: true,
+                        relations: ['activo'],
+                    });
+                } else if (itemSeed.codigoSistema) {
+                    item = await this.itemsRepo.findOne({
+                        where: { codigo_sistema: itemSeed.codigoSistema },
+                        withDeleted: true,
+                        relations: ['activo'],
+                    });
+                } else if (itemSeed.codigoUnico) {
+                    item = await this.itemsRepo.findOne({
+                        where: { codigo_unico: itemSeed.codigoUnico },
+                        withDeleted: true,
+                        relations: ['activo'],
+                    });
+                }
+
+                if (!item) {
+                    item = this.itemsRepo.create({
+                        activo,
+                        codigo_inventario: itemSeed.codigoInventario,
+                        codigo_unico: itemSeed.codigoUnico,
+                        codigo_sistema: itemSeed.codigoSistema,
+                        descripcion: itemSeed.descripcion,
+                        ue: grupo.ue,
+                        estado_fisico: itemSeed.estadoFisico,
+                        estado: 'disponible',
+                        precio: 0,
+                    });
+                } else {
+                    Object.assign(item, {
+                        activo,
+                        codigo_inventario: itemSeed.codigoInventario,
+                        codigo_unico: itemSeed.codigoUnico,
+                        codigo_sistema: itemSeed.codigoSistema,
+                        descripcion: itemSeed.descripcion,
+                        ue: grupo.ue,
+                        estado_fisico: itemSeed.estadoFisico,
+                        deleted_at: null,
+                    });
+                }
+
+                await this.itemsRepo.save(item);
+            }
+        }
+
+        this.logger.log('Seed de activos fijos aplicado.');
+    }
 
     async seedDemo() {
         const seedForceRefresh = (process.env.SEED_FORCE_REFRESH ?? '').toLowerCase() === 'true';
@@ -62,16 +206,24 @@ export class SeedServicio {
             observaciones: string,
             precio: number,
         ) => {
-            const item = await this.itemsRepo.findOne({ where: { codigoInventario } });
+            const item = await this.itemsRepo.findOne({ where: { codigo_inventario: codigoInventario } });
             if (item) {
-                Object.assign(item, { codigoInventario, fechaEntrega, fechaRetiro, estado, observaciones, precio, activo });
+                Object.assign(item, {
+                    codigo_inventario: codigoInventario,
+                    fecha_entrega: fechaEntrega as unknown as Date,
+                    fecha_retiro: (fechaRetiro as unknown as Date) ?? undefined,
+                    estado,
+                    observaciones,
+                    precio,
+                    activo,
+                });
                 return this.itemsRepo.save(item);
             }
             return this.itemsRepo.save(this.itemsRepo.create({
                 activo,
-                codigoInventario,
-                fechaEntrega,
-                fechaRetiro: fechaRetiro ?? undefined,
+                codigo_inventario: codigoInventario,
+                fecha_entrega: fechaEntrega as unknown as Date,
+                fecha_retiro: (fechaRetiro as unknown as Date) ?? undefined,
                 estado,
                 observaciones,
                 precio,
@@ -191,13 +343,13 @@ export class SeedServicio {
         const doc2 = await ensureDocente('DOC-002', 'Maria', 'Lopez', 'SIS104', '7654321');
         const doc3 = await ensureDocente('DOC-003', 'Armando', 'Casas', 'SIS101', '3456789');
 
-        const itemA = await this.itemsRepo.findOne({ where: { codigoInventario: 'ACT-TEST-001' } });
-        const itemB = await this.itemsRepo.findOne({ where: { codigoInventario: 'ACT-TEST-002' } });
+        const itemA = await this.itemsRepo.findOne({ where: { codigo_inventario: 'ACT-TEST-001' } });
+        const itemB = await this.itemsRepo.findOne({ where: { codigo_inventario: 'ACT-TEST-002' } });
 
         const ensurePrestamo = async (
             carnetEstudiante: string,
             codigoDocente: string,
-            itemActivo: ItemActivo | null,
+            itemActivo: ItemActivoFijo | null,
             fechaPrestamo: string,
             fechaDevolucion: string | null,
             estado: string,

@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, DeleteDateColumn } from 'typeorm';
-import { ActivoFijo } from './activo_fijo.entidad';
+import { ActivoFijo } from '@/modulos/activo/entidades/activo-fijo.entidad';
 
 @Entity('contenedores_activos')
 export class ContenedorActivo {
@@ -13,10 +13,10 @@ export class ContenedorActivo {
     ubicacion!: string;
 
     @CreateDateColumn({ type: 'timestamp', name: 'created_at' })
-    createdAt!: Date;
+    created_at!: Date;
 
     @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-    deletedAt?: Date | null;
+    deleted_at?: Date | null;
 
     @OneToMany(() => ActivoFijo, (activo: ActivoFijo) => activo.contenedor)
     activos!: ActivoFijo[];

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { MaterialServicio } from './material.servicio';
 
 @Controller('materiales')
@@ -12,7 +12,6 @@ export class MaterialControlador {
 
     @Get('cajas')
     async obtenerCajas() {
-        // Materiales fungibles son referidos como "cajas" por reglas de negocio
         return await this.materialServicio.obtenerCajas();
     }
 
@@ -32,12 +31,14 @@ export class MaterialControlador {
     async crearCaja(
         @Body()
         body: {
-            idContenedor: number;
+            idContenedor?: number;
             nombre: string;
             categoria?: string;
             descripcion?: string;
             unidad?: string;
+            stockMinimoHabilitado?: boolean;
             stockMinimo?: number;
+            tipoIdentificacion?: 'lote' | 'serie' | 'simple';
         },
     ) {
         return this.materialServicio.crearCaja(body);
@@ -48,7 +49,10 @@ export class MaterialControlador {
         @Body()
         body: {
             idMaterial: number;
-            lote: string;
+            idContenedor: number;
+            tipo: 'lote' | 'serie' | 'simple';
+            lote?: string | null;
+            serie?: string | null;
             fechaEntrega?: string | null;
             fechaRetiro?: string | null;
             cantidadDisponible?: number;
@@ -78,7 +82,7 @@ export class MaterialControlador {
     @Put('cajas/:id')
     async editarCaja(
         @Param('id', ParseIntPipe) id: number,
-        @Body() body: Partial<{ nombre: string; categoria: string; descripcion: string; unidad: string; stockMinimo: number }>,
+        @Body() body: Partial<{ nombre: string; categoria: string; descripcion: string; unidad: string; stockMinimoHabilitado: boolean; stockMinimo: number; tipoIdentificacion: 'lote' | 'serie' | 'simple' }>,
     ) {
         return this.materialServicio.editarCaja(id, body);
     }
@@ -93,15 +97,15 @@ export class MaterialControlador {
 
     @Put('lotes/:id')
     async editarLote(
-        @Param('id', ParseIntPipe) id: number,
-        @Body() body: Partial<{ lote: string; fechaEntrega: string | null; fechaRetiro: string | null; cantidadDisponible: number; fechaCaducidad: string | null; precio: number }>,
+        @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+        @Body() body: Partial<{ tipo: 'lote' | 'serie' | 'simple'; lote: string | null; serie: string | null; fechaEntrega: string | null; fechaRetiro: string | null; cantidadDisponible: number; fechaCaducidad: string | null; precio: number }>,
     ) {
         return this.materialServicio.editarLote(id, body);
     }
 
     @Delete('lotes/:id')
     async eliminarLote(
-        @Param('id', ParseIntPipe) id: number,
+        @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     ) {
         await this.materialServicio.eliminarLote(id);
         return { ok: true };

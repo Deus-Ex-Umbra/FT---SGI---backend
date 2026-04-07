@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany, DeleteDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, DeleteDateColumn, ManyToMany, JoinTable } from 'typeorm';
 import { PrestamoEntidad } from './prestamo.entidad';
+import { MateriaEntidad } from './materia.entidad';
 
 @Entity('docentes')
 export class DocenteEntidad {
@@ -26,4 +27,12 @@ export class DocenteEntidad {
 
   @OneToMany(() => PrestamoEntidad, (prestamo: PrestamoEntidad) => prestamo.docente)
   prestamos!: PrestamoEntidad[];
+
+  @ManyToMany(() => MateriaEntidad, (materia: MateriaEntidad) => materia.docentes)
+  @JoinTable({
+    name: 'docentes_materias',
+    joinColumn: { name: 'id_docente', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'id_materia', referencedColumnName: 'id' },
+  })
+  materias!: MateriaEntidad[];
 }
