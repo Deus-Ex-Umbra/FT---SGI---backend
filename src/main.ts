@@ -4,12 +4,27 @@ import { AppModulo } from './app.modulo';
 import { DataSource } from 'typeorm';
 import { UsuarioServicio } from './modulos/usuario/usuario.servicio';
 
-const esOrigenLocalPermitido = (origin: string | undefined): boolean => {
+const esOrigenPermitido = (origin: string | undefined): boolean => {
   if (!origin) return true;
+
+  const origenesPermitidos = [
+    'https://ft-sgi-frontend.vercel.app',
+    'https://ft-sgi-backend.vercel.app',
+  ];
+
+  // Normalizar origen (eliminar slash al final si existe)
+  const origenNormalizado = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+
+  if (origenesPermitidos.includes(origenNormalizado)) {
+    return true;
+  }
 
   try {
     const url = new URL(origin);
-    return ['localhost', '127.0.0.1'].includes(url.hostname);
+    return (
+      ['localhost', '127.0.0.1'].includes(url.hostname) ||
+      url.hostname.endsWith('.vercel.app')
+    );
   } catch {
     return false;
   }
@@ -23,12 +38,12 @@ async function bootstrap() {
       origin: string | undefined,
       callback: (error: Error | null, allow?: boolean) => void,
     ) => {
-      if (esOrigenLocalPermitido(origin)) {
+      if (esOrigenPermitido(origin)) {
         callback(null, true);
         return;
       }
 
-      callback(new Error(`Origen no permitido por CORS en desarrollo: ${origin}`), false);
+      callback(new Error(`Origen no permitido por CORS: ${origin}`), false);
     },
     credentials: true,
   });
