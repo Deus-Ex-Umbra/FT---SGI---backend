@@ -4,7 +4,6 @@ import { ActivoFungible } from './activo-fungible.entidad';
 
 @Entity('items_activos_fungibles')
 export class ItemActivoFungible {
-    // ID de sistema (UUIDv4).
     @PrimaryColumn('uuid')
     id!: string;
 
@@ -12,15 +11,12 @@ export class ItemActivoFungible {
     @JoinColumn({ name: 'id_activo' })
     activo!: ActivoFungible;
 
-    // Código de sistema/externo (si aplica). No es el ID de sistema.
     @Column({ name: 'codigo_sistema', type: 'varchar', length: 36, unique: true, nullable: true })
     codigo_sistema!: string | null;
 
-    // Para fungibles: puede ser nulo si el activo se identifica solo por sistema.
     @Column({ name: 'codigo_inventario', type: 'varchar', length: 50, unique: true, nullable: true })
     codigo_inventario!: string | null;
 
-    // Para fungibles serializados (serie) o identificables por un código único externo.
     @Column({ name: 'codigo_unico', type: 'varchar', length: 120, unique: true, nullable: true })
     codigo_unico!: string | null;
 
@@ -33,7 +29,6 @@ export class ItemActivoFungible {
     @Column({ name: 'fecha_vencimiento', type: 'date', nullable: true })
     fecha_vencimiento?: Date | null;
 
-    // Cantidad registrada para este item/lote.
     @Column({ name: 'cantidad', type: 'numeric', precision: 14, scale: 4, default: 0 })
     cantidad!: number;
 

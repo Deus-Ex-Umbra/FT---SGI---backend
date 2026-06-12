@@ -2,20 +2,39 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { AppModulo } from './app.modulo';
 import { DataSource } from 'typeorm';
+import { UsuarioServicio } from './modulos/usuario/usuario.servicio';
+
+const esOrigenLocalPermitido = (origin: string | undefined): boolean => {
+  if (!origin) return true;
+
+  try {
+    const url = new URL(origin);
+    return ['localhost', '127.0.0.1'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+};
 
 async function bootstrap() {
   const logger = new Logger('AppServer');
-
   const app = await NestFactory.create(AppModulo);
   app.enableCors({
-    origin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
+      if (esOrigenLocalPermitido(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origen no permitido por CORS en desarrollo: ${origin}`), false);
+    },
     credentials: true,
   });
   await app.init();
-
-  // Log mínimo para confirmar a qué DB está conectada la app (sin exponer password).
+  await app.get(UsuarioServicio).ensureAdministrador();
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const opts: any = app.get(DataSource).options ?? {};
     if (opts.url) {
       const u = new URL(String(opts.url));
@@ -27,7 +46,6 @@ async function bootstrap() {
       );
     }
   } catch {
-    // no-op
   }
 
   const port = Number(process.env.PORT ?? 3001);
@@ -39,3 +57,5 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+

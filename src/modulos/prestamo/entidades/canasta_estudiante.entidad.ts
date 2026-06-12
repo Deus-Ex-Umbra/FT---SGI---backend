@@ -1,5 +1,5 @@
 import { CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Column } from 'typeorm';
-import { EstudianteEntidad } from './estudiante.entidad';
+import { EstudianteEntidad } from '@/modulos/estudiante/entidades/estudiante.entidad';
 
 @Entity('canasta_estudiantes')
 @Index('idx_canasta_estudiantes_grupo', ['grupoCanasta'])
@@ -14,6 +14,9 @@ export class CanastaEstudianteEntidad {
   @ManyToOne(() => EstudianteEntidad, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'id_estudiante' })
   estudiante!: EstudianteEntidad;
+
+  @Column({ name: 'carnet_retenido', type: 'boolean', default: false })
+  carnetRetenido!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;

@@ -4,7 +4,6 @@ import { ActivoFijo } from './activo-fijo.entidad';
 
 @Entity('items_activos')
 export class ItemActivoFijo {
-    // ID de sistema (UUIDv4).
     @PrimaryColumn('uuid')
     id!: string;
 
@@ -18,7 +17,6 @@ export class ItemActivoFijo {
     @Column({ name: 'codigo_unico', type: 'varchar', length: 120, unique: true, nullable: true })
     codigo_unico!: string | null;
 
-    // Código de sistema/externo (si aplica). No es el ID de sistema.
     @Column({ name: 'codigo_sistema', type: 'varchar', length: 36, unique: true, nullable: true })
     codigo_sistema!: string | null;
 
@@ -38,10 +36,8 @@ export class ItemActivoFijo {
     fecha_retiro?: Date;
 
     @Column({ length: 30, default: 'disponible' })
-    estado!: string; // 'disponible', 'en_prestamo', 'en_mantenimiento', 'extraviado', 'dado_de_baja'
-
-    // Estado físico (condición del equipo) independiente del flujo operativo.
-    // Valores: 'bueno' | 'regular' | 'malo'
+    estado!: string; 
+    
     @Column({ name: 'estado_fisico', length: 15, default: 'bueno' })
     estado_fisico!: string;
 

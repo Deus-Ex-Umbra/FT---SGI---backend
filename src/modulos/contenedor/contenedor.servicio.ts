@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
+import { InventarioEntidad } from '@/modulos/inventario/entidades/inventario.entidad';
+import { Usuario } from '@/modulos/usuario/entidades/usuario.entidad';
 import { ContenedorActivo } from './entidades/contenedor-activo.entidad';
-import { ContenedorMaterial } from '@/modulos/material/entidades/contenedor_material.entidad';
 
 export interface ContenedorCompartido {
     id: string;
@@ -12,6 +13,17 @@ export interface ContenedorCompartido {
     idMaterial?: number;
 }
 
+type UsuarioAutenticado = {
+    id: number;
+    rol: string;
+    id_inventario?: number | null;
+};
+
+type ContextoInventario = {
+    esAdmin: boolean;
+    idInventario: number | null;
+};
+
 @Injectable()
 export class ContenedorCompartidoServicio {
     constructor(
@@ -19,151 +31,209 @@ export class ContenedorCompartidoServicio {
         private readonly dataSource: DataSource,
         @InjectRepository(ContenedorActivo)
         private readonly contenedorActivoRepositorio: Repository<ContenedorActivo>,
-        @InjectRepository(ContenedorMaterial)
-        private readonly contenedorMaterialRepositorio: Repository<ContenedorMaterial>,
+        @InjectRepository(Usuario)
+        private readonly usuarioRepositorio: Repository<Usuario>,
+        @InjectRepository(InventarioEntidad)
+        private readonly inventarioRepositorio: Repository<InventarioEntidad>,
     ) {}
 
-    async obtenerTodos(): Promise<ContenedorCompartido[]> {
-        const [contenedoresActivos, contenedoresMateriales] = await Promise.all([
-            this.contenedorActivoRepositorio.find({ where: { deleted_at: IsNull() }, order: { id: 'ASC' } }),
-            this.contenedorMaterialRepositorio.find({ where: { deletedAt: IsNull() }, order: { id: 'ASC' } }),
-        ]);
-
-        const agrupados = new Map<string, ContenedorCompartido>();
-
-        const agregar = (payload: { id: number; nombre: string; ubicacion: string; tipo: 'activo' | 'material' }) => {
-            const nombre = payload.nombre.trim();
-            const descripcion = payload.ubicacion.trim();
-            const clave = `${nombre.toLowerCase()}::${descripcion.toLowerCase()}`;
-            const actual = agrupados.get(clave) ?? {
-                id: `CA0-CM0-${clave}`,
-                nombre,
-                descripcion,
-            };
-
-            if (payload.tipo === 'activo') {
-                actual.idActivo = payload.id;
-            } else {
-                actual.idMaterial = payload.id;
-            }
-
-            actual.id = `CA${actual.idActivo ?? 0}-CM${actual.idMaterial ?? 0}-${clave}`;
-
-            agrupados.set(clave, actual);
-        };
-
-        contenedoresActivos.forEach((contenedor) => {
-            agregar({ id: contenedor.id, nombre: contenedor.nombre, ubicacion: contenedor.ubicacion, tipo: 'activo' });
-        });
-        contenedoresMateriales.forEach((contenedor) => {
-            agregar({ id: contenedor.id, nombre: contenedor.nombre, ubicacion: contenedor.ubicacion, tipo: 'material' });
-        });
-
-        return Array.from(agrupados.values()).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    private claveContenedor(nombre: string, descripcion: string): string {
+        return `${nombre.trim().toLowerCase()}::${descripcion.trim().toLowerCase()}`;
     }
 
-    async crear(datos: { nombre: string; descripcion: string }): Promise<ContenedorCompartido> {
-        const nombre = datos.nombre?.trim();
-        const descripcion = datos.descripcion?.trim();
+    private async resolverContextoInventario(usuario: UsuarioAutenticado): Promise<ContextoInventario> {
+        if (usuario.rol === 'administrador') {
+            return { esAdmin: true, idInventario: null };
+        }
 
-        if (!nombre || !descripcion) {
-            throw new BadRequestException('Nombre y descripción son obligatorios para crear un contenedor.');
+        if (usuario.rol !== 'encargado_inventario') {
+            throw new ForbiddenException('No tienes permisos para gestionar contenedores.');
+        }
+
+        return {
+            esAdmin: false,
+            idInventario: usuario.id_inventario ?? null,
+        };
+    }
+
+    private async obtenerInventarioPorId(idInventario?: number | null): Promise<InventarioEntidad | null> {
+        if (idInventario == null) return null;
+
+        const id = Number(idInventario);
+        if (!Number.isFinite(id) || id <= 0) {
+            throw new BadRequestException('El inventario seleccionado no es válido.');
+        }
+
+        const inventario = await this.inventarioRepositorio.findOne({
+            where: { id, deleted_at: IsNull() },
+        });
+        if (!inventario) {
+            throw new NotFoundException('Inventario no encontrado.');
+        }
+
+        return inventario;
+    }
+
+    async obtenerTodos(usuario: UsuarioAutenticado): Promise<ContenedorCompartido[]> {
+        const contexto = await this.resolverContextoInventario(usuario);
+
+        const consultaActivos = this.contenedorActivoRepositorio
+            .createQueryBuilder('ca')
+            .where('ca.deleted_at IS NULL')
+            .orderBy('ca.id', 'ASC');
+
+        if (!contexto.esAdmin) {
+            if (!contexto.idInventario) return [];
+            consultaActivos.andWhere('ca.id_inventario = :idInventario', { idInventario: contexto.idInventario });
+        }
+
+        const contenedoresActivos = await consultaActivos.getMany();
+
+        return contenedoresActivos.map((contenedor) => ({
+            id: `CA${contenedor.id}-CM0-${this.claveContenedor(contenedor.nombre, contenedor.ubicacion)}`,
+            nombre: contenedor.nombre,
+            descripcion: contenedor.ubicacion,
+            idActivo: contenedor.id,
+        })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    }
+
+    async crear(
+        datos: { nombre: string; descripcion: string; idInventario?: number },
+        usuario: UsuarioAutenticado,
+    ): Promise<ContenedorCompartido> {
+        const contexto = await this.resolverContextoInventario(usuario);
+
+        const nombre = datos.nombre?.trim();
+        if (!nombre) {
+            throw new BadRequestException('El nombre es obligatorio para crear un contenedor.');
+        }
+
+        const descripcion = datos.descripcion?.trim() ?? '';
+
+        let inventario: InventarioEntidad | null = null;
+        if (contexto.esAdmin) {
+            inventario = await this.obtenerInventarioPorId(datos.idInventario ?? null);
+        } else {
+            if (!contexto.idInventario) {
+                throw new ForbiddenException('No tienes inventario asignado para crear contenedores.');
+            }
+            if (datos.idInventario && Number(datos.idInventario) !== contexto.idInventario) {
+                throw new ForbiddenException('No puedes crear contenedores en otro inventario.');
+            }
+            inventario = await this.obtenerInventarioPorId(contexto.idInventario);
         }
 
         return this.dataSource.transaction(async (manager) => {
             const activoRepositorio = manager.getRepository(ContenedorActivo);
-            const materialRepositorio = manager.getRepository(ContenedorMaterial);
 
-            const [existenteActivo, existenteMaterial] = await Promise.all([
-                activoRepositorio.findOne({ where: { nombre, ubicacion: descripcion, deleted_at: IsNull() } }),
-                materialRepositorio.findOne({ where: { nombre, ubicacion: descripcion, deletedAt: IsNull() } }),
-            ]);
+            const consultaActivo = activoRepositorio
+                .createQueryBuilder('ca')
+                .where('ca.deleted_at IS NULL')
+                .andWhere('LOWER(TRIM(ca.nombre)) = LOWER(:nombre)', { nombre })
+                .andWhere('LOWER(TRIM(ca.ubicacion)) = LOWER(:descripcion)', { descripcion });
 
-            if (existenteActivo && existenteMaterial) {
-                throw new BadRequestException('Ya existe un contenedor con ese nombre y descripción.');
+            if (inventario) {
+                consultaActivo.andWhere('ca.id_inventario = :idInventario', { idInventario: inventario.id });
+            } else {
+                consultaActivo.andWhere('ca.id_inventario IS NULL');
             }
 
+            const existenteActivo = await consultaActivo.getOne();
+
             const contenedorActivo = existenteActivo ?? await activoRepositorio.save(
-                activoRepositorio.create({ nombre, ubicacion: descripcion }),
-            );
-            const contenedorMaterial = existenteMaterial ?? await materialRepositorio.save(
-                materialRepositorio.create({ nombre, ubicacion: descripcion }),
+                activoRepositorio.create({ nombre, ubicacion: descripcion, inventario }),
             );
 
             return {
-                id: `CA${contenedorActivo.id}-CM${contenedorMaterial.id}-${nombre.toLowerCase()}::${descripcion.toLowerCase()}`,
+                id: `CA${contenedorActivo.id}-CM0-${this.claveContenedor(nombre, descripcion)}`,
                 nombre,
                 descripcion,
                 idActivo: contenedorActivo.id,
-                idMaterial: contenedorMaterial.id,
             };
         });
     }
 
-    async editar(datos: { idActivo?: number; idMaterial?: number; nombre: string; descripcion: string }): Promise<ContenedorCompartido> {
-        const nombre = datos.nombre?.trim();
-        const descripcion = datos.descripcion?.trim();
+    async editar(
+        datos: { idActivo?: number; idMaterial?: number; nombre: string; descripcion: string; idInventario?: number },
+        usuario: UsuarioAutenticado,
+    ): Promise<ContenedorCompartido> {
+        const contexto = await this.resolverContextoInventario(usuario);
 
-        if (!nombre || !descripcion) {
-            throw new BadRequestException('Nombre y descripción son obligatorios para editar un contenedor.');
+        const nombre = datos.nombre?.trim();
+        if (!nombre) {
+            throw new BadRequestException('El nombre es obligatorio para editar un contenedor.');
         }
+
+        const descripcion = datos.descripcion?.trim() ?? '';
 
         return this.dataSource.transaction(async (manager) => {
             const activoRepositorio = manager.getRepository(ContenedorActivo);
-            const materialRepositorio = manager.getRepository(ContenedorMaterial);
 
-            const [contenedorActivo, contenedorMaterial] = await Promise.all([
-                datos.idActivo ? activoRepositorio.findOne({ where: { id: Number(datos.idActivo), deleted_at: IsNull() } }) : Promise.resolve(null),
-                datos.idMaterial ? materialRepositorio.findOne({ where: { id: Number(datos.idMaterial), deletedAt: IsNull() } }) : Promise.resolve(null),
-            ]);
+            const contenedorActivo = datos.idActivo
+                ? await activoRepositorio.findOne({
+                    where: { id: Number(datos.idActivo), deleted_at: IsNull() },
+                    relations: ['inventario'],
+                })
+                : null;
 
-            if (!contenedorActivo && !contenedorMaterial) {
+            if (!contenedorActivo) {
                 throw new NotFoundException('Contenedor no encontrado para editar.');
             }
 
-            if (contenedorActivo) {
-                contenedorActivo.nombre = nombre;
-                contenedorActivo.ubicacion = descripcion;
-                await activoRepositorio.save(contenedorActivo);
+            if (!contexto.esAdmin) {
+                if (!contexto.idInventario) {
+                    throw new ForbiddenException('No tienes inventario asignado para editar contenedores.');
+                }
+                if (contenedorActivo.inventario?.id !== contexto.idInventario) {
+                    throw new ForbiddenException('No puedes editar contenedores de otro inventario.');
+                }
             }
 
-            if (contenedorMaterial) {
-                contenedorMaterial.nombre = nombre;
-                contenedorMaterial.ubicacion = descripcion;
-                await materialRepositorio.save(contenedorMaterial);
+            contenedorActivo.nombre = nombre;
+            contenedorActivo.ubicacion = descripcion;
+
+            if (contexto.esAdmin && datos.idInventario !== undefined) {
+                contenedorActivo.inventario = await this.obtenerInventarioPorId(datos.idInventario ?? null);
             }
+
+            await activoRepositorio.save(contenedorActivo);
 
             return {
-                id: `CA${contenedorActivo?.id ?? 0}-CM${contenedorMaterial?.id ?? 0}-${nombre.toLowerCase()}::${descripcion.toLowerCase()}`,
+                id: `CA${contenedorActivo.id}-CM0-${this.claveContenedor(nombre, descripcion)}`,
                 nombre,
                 descripcion,
-                idActivo: contenedorActivo?.id,
-                idMaterial: contenedorMaterial?.id,
+                idActivo: contenedorActivo.id,
             };
         });
     }
 
-    async eliminar(datos: { idActivo?: number; idMaterial?: number }): Promise<void> {
+    async eliminar(datos: { idActivo?: number; idMaterial?: number }, usuario: UsuarioAutenticado): Promise<void> {
+        const contexto = await this.resolverContextoInventario(usuario);
+
         await this.dataSource.transaction(async (manager) => {
             const activoRepositorio = manager.getRepository(ContenedorActivo);
-            const materialRepositorio = manager.getRepository(ContenedorMaterial);
 
-            const [contenedorActivo, contenedorMaterial] = await Promise.all([
-                datos.idActivo ? activoRepositorio.findOne({ where: { id: Number(datos.idActivo), deleted_at: IsNull() } }) : Promise.resolve(null),
-                datos.idMaterial ? materialRepositorio.findOne({ where: { id: Number(datos.idMaterial), deletedAt: IsNull() } }) : Promise.resolve(null),
-            ]);
+            const contenedorActivo = datos.idActivo
+                ? await activoRepositorio.findOne({
+                    where: { id: Number(datos.idActivo), deleted_at: IsNull() },
+                    relations: ['inventario'],
+                })
+                : null;
 
-            if (!contenedorActivo && !contenedorMaterial) {
+            if (!contenedorActivo) {
                 throw new NotFoundException('Contenedor no encontrado para eliminar.');
             }
 
-            if (contenedorActivo) {
-                await activoRepositorio.softRemove(contenedorActivo);
+            if (!contexto.esAdmin) {
+                if (!contexto.idInventario) {
+                    throw new ForbiddenException('No tienes inventario asignado para eliminar contenedores.');
+                }
+                if (contenedorActivo.inventario?.id !== contexto.idInventario) {
+                    throw new ForbiddenException('No puedes eliminar contenedores de otro inventario.');
+                }
             }
 
-            if (contenedorMaterial) {
-                await materialRepositorio.softRemove(contenedorMaterial);
-            }
+            await activoRepositorio.softRemove(contenedorActivo);
         });
     }
 }

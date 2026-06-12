@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Usuario } from '@/modulos/usuario/entidades/usuario.entidad';
+import { EnlaceFirmadoServicio } from '@/modulos/enlace-firmado/enlace-firmado.servicio';
 import { ConfiguracionIAEntidad } from './entidades/configuracion-ia.entidad';
 import { ActualizarConfiguracionIADto } from './dto/actualizar-configuracion-ia.dto';
+import { ConfiguracionRegistroEstudianteEntidad } from './entidades/configuracion-registro-estudiante.entidad';
 
 @Injectable()
 export class ConfiguracionServicio {
@@ -12,7 +14,21 @@ export class ConfiguracionServicio {
     private readonly repoIA: Repository<ConfiguracionIAEntidad>,
     @InjectRepository(Usuario)
     private readonly repoUsuario: Repository<Usuario>,
+    @InjectRepository(ConfiguracionRegistroEstudianteEntidad)
+    private readonly repoRegistroEstudiante: Repository<ConfiguracionRegistroEstudianteEntidad>,
+    private readonly enlaceFirmadoServicio: EnlaceFirmadoServicio,
   ) {}
+
+  private async obtenerRegistroEstudianteEntidad(): Promise<ConfiguracionRegistroEstudianteEntidad> {
+    const existente = await this.repoRegistroEstudiante.findOne({ where: { id: 1 } });
+    if (existente) return existente;
+
+    const nueva = this.repoRegistroEstudiante.create({
+      id: 1,
+      registroEstudianteHabilitado: true,
+    });
+    return await this.repoRegistroEstudiante.save(nueva);
+  }
 
   async obtenerIA(usuarioId: number): Promise<ConfiguracionIAEntidad> {
     const existente = await this.repoIA.findOne({
@@ -36,5 +52,25 @@ export class ConfiguracionServicio {
     if (dto.geminiApiKey !== undefined) cfg.geminiApiKey = dto.geminiApiKey?.trim() || null;
     await this.repoIA.save(cfg);
     return { geminiApiUrl: cfg.geminiApiUrl, geminiApiKeyConfigurada: Boolean(cfg.geminiApiKey) };
+  }
+
+  async obtenerRegistroEstudiante() {
+    const cfg = await this.obtenerRegistroEstudianteEntidad();
+    return { habilitado: cfg.registroEstudianteHabilitado };
+  }
+
+  async actualizarRegistroEstudiante(habilitado: boolean) {
+    const cfg = await this.obtenerRegistroEstudianteEntidad();
+
+    const habilitadoNormalizado = Boolean(habilitado);
+    const huboCambio = cfg.registroEstudianteHabilitado !== habilitadoNormalizado;
+    cfg.registroEstudianteHabilitado = habilitadoNormalizado;
+    await this.repoRegistroEstudiante.save(cfg);
+
+    if (huboCambio) {
+      await this.enlaceFirmadoServicio.deshabilitarInvitacionRegistro();
+    }
+
+    return { habilitado: cfg.registroEstudianteHabilitado };
   }
 }

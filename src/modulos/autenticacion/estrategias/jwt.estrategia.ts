@@ -13,7 +13,21 @@ export class JwtEstrategia extends PassportStrategy(Strategy) {
         });
     }
 
-    async validate(carga: { sub: number; nombre_usuario: string; rol: string }) {
-        return { id: carga.sub, nombre_usuario: carga.nombre_usuario, rol: carga.rol };
+    async validate(carga: { 
+        sub: number; 
+        correo: string; 
+        rol: string; 
+        id_inventario?: number | null; 
+        puedeEditarFijos?: boolean; 
+        puedeEditarFungibles?: boolean;
+    }) {
+        return {
+            id: carga.sub,
+            correo: carga.correo,
+            rol: carga.rol,
+            id_inventario: carga.id_inventario ?? null,
+            puedeEditarFijos: carga.puedeEditarFijos ?? false,
+            puedeEditarFungibles: carga.puedeEditarFungibles ?? false,
+        };
     }
 }

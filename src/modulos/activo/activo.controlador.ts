@@ -1,101 +1,188 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Request, UseGuards } from '@nestjs/common';
+import { JwtAutenticacionGuardia } from '@/modulos/autenticacion/guardias/jwt-autenticacion.guardia';
+import { Roles } from '@/modulos/autenticacion/guardias/roles.decorador';
+import { RolesGuardia } from '@/modulos/autenticacion/guardias/roles.guardia';
+import { PertenenciaInventarioGuardia } from '@/modulos/autenticacion/guardias/pertenencia-inventario.guardia';
 import { ActivoServicio } from './activo.servicio';
 
+import { CrearActivoFijoDto } from './dto/crear-activo-fijo.dto';
+import { EditarActivoFijoDto } from './dto/editar-activo-fijo.dto';
+import { CrearItemActivoDto } from './dto/crear-item.dto';
+
+export interface UsuarioConPermisos {
+    id: number;
+    rol: string;
+    id_inventario?: number | null;
+    puedeEditarFijos?: boolean;
+}
+
 @Controller('activos')
+@UseGuards(JwtAutenticacionGuardia, RolesGuardia, PertenenciaInventarioGuardia)
+@Roles('administrador', 'encargado_inventario', 'docente', 'estudiante')
 export class ActivoControlador {
     constructor(private readonly servicio: ActivoServicio) { }
 
     @Get('fijos')
-    obtenerFijos() {
-        return this.servicio.obtenerTodosFijos();
+    obtenerFijos(@Request() req: { user: UsuarioConPermisos }) {
+        return this.servicio.obtenerTodosFijos(req.user);
+    }
+
+    @Get('fijos/inventario/:id')
+    obtenerFijosPorInventario(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id', ParseIntPipe) id: number,
+    ) {
+        return this.servicio.obtenerFijosPorInventario(id, req.user);
     }
 
     @Post('fijos')
     crearActivoFijo(
-        @Body() body: { nombre: string; idContenedor?: number; categoria?: string; descripcion?: string },
+        @Request() req: { user: UsuarioConPermisos },
+        @Body() dto: CrearActivoFijoDto,
     ) {
-        return this.servicio.crearActivoFijo(body);
+        return this.servicio.crearActivoFijo(dto, req.user);
     }
 
     @Put('fijos/:id')
     editarActivoFijo(
-        @Param('id') id: string,
-        @Body() body: Partial<{ nombre: string; categoria: string; descripcion: string }>,
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: EditarActivoFijoDto,
     ) {
-        return this.servicio.editarActivoFijo(Number(id), body);
+        return this.servicio.editarActivoFijo(id, dto, req.user);
     }
 
     @Delete('fijos/:id')
-    eliminarActivoFijo(@Param('id') id: string) {
-        return this.servicio.eliminarActivoFijo(Number(id));
+    eliminarActivoFijo(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id', ParseIntPipe) id: number,
+    ) {
+        return this.servicio.eliminarActivoFijo(id, req.user);
     }
 
     @Get('contenedores')
-    obtenerContenedores() {
-        return this.servicio.obtenerContenedores();
+    obtenerContenedores(@Request() req: { user: UsuarioConPermisos }) {
+        return this.servicio.obtenerContenedores(req.user);
     }
 
     @Post('contenedores')
-    crearContenedor(@Body() body: { nombre: string; ubicacion: string }) {
-        return this.servicio.crearContenedor(body);
+    crearContenedor(
+        @Request() req: { user: UsuarioConPermisos },
+        @Body() body: { nombre: string; ubicacion: string; idInventario?: number },
+    ) {
+        return this.servicio.crearContenedor(body, req.user);
     }
 
     @Put('contenedores/:id')
     editarContenedor(
-        @Param('id') id: string,
-        @Body() body: Partial<{ nombre: string; ubicacion: string }>,
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id', ParseIntPipe) id: number,
+        @Body() body: Partial<{ nombre: string; ubicacion: string; idInventario: number }>,
     ) {
-        return this.servicio.editarContenedor(Number(id), body);
+        return this.servicio.editarContenedor(id, body, req.user);
+    }
+
+    @Get('items')
+    obtenerItems(@Request() req: { user: UsuarioConPermisos }) {
+        return this.servicio.obtenerItems(req.user);
     }
 
     @Post('items')
-    crearItem(@Body() body: {
-        idActivo: string | number;
-        codigoInventario?: string;
-        codigoUnico?: string;
-        codigoSistema?: string;
-        ubicacion?: string;
-        ue?: string;
-        descripcion?: string;
-        fechaEntrega?: string | null;
-        fechaRetiro?: string | null;
-        estado?: string;
-        estadoFisico?: string;
-        observaciones?: string;
-        precio?: number;
-    }) {
-        return this.servicio.crearItemActivo(body);
+    crearItem(
+        @Request() req: { user: UsuarioConPermisos },
+        @Body() dto: CrearItemActivoDto,
+    ) {
+        return this.servicio.crearItemActivo(dto, req.user);
     }
 
     @Put('items/:id')
     editarItem(
+        @Request() req: { user: UsuarioConPermisos },
         @Param('id') id: string,
-        @Body() body: Partial<{
-            codigoInventario: string;
-            codigoUnico: string;
-            codigoSistema: string;
-            fechaEntrega: string | null;
-            fechaRetiro: string | null;
-            estado: string;
-            estadoFisico: string;
-            ubicacion: string;
-            ue: string;
-            descripcion: string;
-            observaciones: string;
-            precio: number;
-            justificacion: string;
-        }>,
+        @Body() body: any,
     ) {
-        return this.servicio.editarItemActivo(id, body);
+        return this.servicio.editarItemActivo(id, body, req.user);
     }
 
     @Delete('items/:id')
-    eliminarItem(@Param('id') id: string) {
-        return this.servicio.eliminarItemActivo(id);
+    eliminarItem(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id') id: string,
+    ) {
+        return this.servicio.eliminarItemActivo(id, req.user);
     }
 
     @Get('items/:id/transiciones-permitidas')
-    obtenerTransiciones(@Param('id') id: string) {
-        return this.servicio.obtenerTransicionesPermitidas(id);
+    obtenerTransiciones(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id') id: string,
+    ) {
+        return this.servicio.obtenerTransicionesPermitidas(id, req.user);
+    }
+
+    @Get('fungibles')
+    obtenerFungibles(@Request() req: { user: UsuarioConPermisos }) {
+        return this.servicio.obtenerFungibles(req.user);
+    }
+
+    @Post('fungibles')
+    crearActivoFungible(
+        @Request() req: { user: UsuarioConPermisos },
+        @Body() body: any,
+    ) {
+        return this.servicio.crearActivoFungible(body, req.user);
+    }
+
+    @Put('fungibles/:id')
+    editarActivoFungible(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id', ParseIntPipe) id: number,
+        @Body() body: any,
+    ) {
+        return this.servicio.editarActivoFungible(id, body, req.user);
+    }
+
+    @Delete('fungibles/:id')
+    eliminarActivoFungible(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id', ParseIntPipe) id: number,
+    ) {
+        return this.servicio.eliminarActivoFungible(id, req.user);
+    }
+
+    @Post('fungibles/items')
+    crearItemFungible(
+        @Request() req: { user: UsuarioConPermisos },
+        @Body() body: any,
+    ) {
+        return this.servicio.crearItemFungible(body, req.user);
+    }
+
+    @Put('fungibles/items/:id')
+    editarItemFungible(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id') id: string,
+        @Body() body: any,
+    ) {
+        return this.servicio.editarItemFungible(id, body, req.user);
+    }
+
+    @Delete('fungibles/items/:id')
+    eliminarItemFungible(
+        @Request() req: { user: UsuarioConPermisos },
+        @Param('id') id: string,
+    ) {
+        return this.servicio.eliminarItemFungible(id, req.user);
+    }
+
+    @Get('fungibles/:id/kardex')
+    obtenerKardexFungible(
+        @Param('id') id: string,
+    ) {
+        return {
+            materialId: id,
+            materialNombre: 'Fungible',
+            movimientos: [],
+        };
     }
 }

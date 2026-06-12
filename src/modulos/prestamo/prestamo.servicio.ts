@@ -1,753 +1,117 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { IsNull, Repository, Brackets, In } from 'typeorm';
 import { PrestamoEntidad } from './entidades/prestamo.entidad';
-import { EstudianteEntidad } from './entidades/estudiante.entidad';
-import { DocenteEntidad } from './entidades/docente.entidad';
-import { CanastaEstudianteEntidad } from './entidades/canasta_estudiante.entidad';
-import { ItemActivoFijo } from '@/modulos/activo/entidades/item-activo-fijo.entidad';
-import { normalizarEstadoItem } from '@/modulos/activo/dominio/reglas-estado-item';
-import { LoteMaterial } from '@/modulos/material/entidades/lote_material.entidad';
-import { MovimientoMaterial } from '@/modulos/material/entidades/movimiento_material.entidad';
+import { HistorialPrestamoEntidad } from './entidades/historial-prestamo.entidad';
+import { EstudianteEntidad } from '@/modulos/estudiante/entidades/estudiante.entidad';
+import { DocenteEntidad } from '@/modulos/docente/entidades/docente.entidad';
+import { GrupoMateriaDocenteEntidad } from '@/modulos/docencia/entidades/grupo-materia-docente.entidad';
+import { SubgrupoPrestamoDocenciaEntidad } from '@/modulos/docencia/entidades/subgrupo-prestamo-docencia.entidad';
 import { MateriaEntidad } from './entidades/materia.entidad';
-import { CarreraEntidad } from './entidades/carrera.entidad';
+import { CarreraServicio } from './carrera.servicio';
+import { MateriaServicio } from './materia.servicio';
+import { PrestamoCanastaServicio } from './prestamo-canasta.servicio';
+import { PrestamoUtilServicio } from './prestamo-util.servicio';
 
 @Injectable()
 export class PrestamoServicio {
-  private readonly registrarEventoInterno = async (_input: unknown) => undefined;
-
   constructor(
-    @InjectRepository(PrestamoEntidad)
-    private readonly prestamosRepo: Repository<PrestamoEntidad>,
-    @InjectRepository(EstudianteEntidad)
-    private readonly estudiantesRepo: Repository<EstudianteEntidad>,
-    @InjectRepository(DocenteEntidad)
-    private readonly docentesRepo: Repository<DocenteEntidad>,
+    private readonly carreraServicio: CarreraServicio,
+    private readonly materiaServicio: MateriaServicio,
+    private readonly prestamoCanastaServicio: PrestamoCanastaServicio,
+    private readonly util: PrestamoUtilServicio,
+    @InjectRepository(GrupoMateriaDocenteEntidad)
+    private readonly gruposMateriaDocenciaRepo: Repository<GrupoMateriaDocenteEntidad>,
+    @InjectRepository(SubgrupoPrestamoDocenciaEntidad)
+    private readonly subgruposPrestamoRepo: Repository<SubgrupoPrestamoDocenciaEntidad>,
     @InjectRepository(MateriaEntidad)
     private readonly materiasRepo: Repository<MateriaEntidad>,
-    @InjectRepository(CanastaEstudianteEntidad)
-    private readonly canastaEstudiantesRepo: Repository<CanastaEstudianteEntidad>,
-    @InjectRepository(CarreraEntidad)
-    private readonly carrerasRepo: Repository<CarreraEntidad>,
-    @InjectRepository(ItemActivoFijo)
-    private readonly itemsActivosRepo: Repository<ItemActivoFijo>,
-    @InjectRepository(LoteMaterial)
-    private readonly lotesRepo: Repository<LoteMaterial>,
-    @InjectRepository(MovimientoMaterial)
-    private readonly movimientosMaterialRepo: Repository<MovimientoMaterial>,
   ) {}
 
-  private normalizarCodigo(valor: string): string {
-    return valor.trim();
-  }
-
-  private async upsertMateriaPorCodigo(codigo: string): Promise<MateriaEntidad> {
-    const limpio = this.normalizarCodigo(codigo);
-    if (!limpio) throw new BadRequestException('El código de materia es obligatorio.');
-    const existente = await this.materiasRepo.findOne({ where: { codigo: limpio } });
-    if (existente) return existente;
-    const creado = this.materiasRepo.create({ codigo: limpio, nombre: null });
-    return this.materiasRepo.save(creado);
-  }
-
-  private async resolverMateriasParaDocente(input: { materiasIds?: number[]; materias?: string[]; materia?: string }): Promise<MateriaEntidad[]> {
-    const ids = (input.materiasIds ?? []).filter((n) => Number.isInteger(n) && n > 0);
-    if (ids.length) {
-      const materias = await this.materiasRepo.find({ where: { id: In(ids) } });
-      if (materias.length !== ids.length) {
-        throw new BadRequestException('Una o más materias no existen en el catálogo.');
-      }
-      return materias;
-    }
-
-    const codigos = (input.materias ?? []).map((c) => this.normalizarCodigo(c)).filter(Boolean);
-    const unico = Array.from(new Set(codigos.length ? codigos : (input.materia ? [this.normalizarCodigo(input.materia)] : []))).filter(Boolean);
-    if (unico.length === 0) return [];
-    const resueltas: MateriaEntidad[] = [];
-    for (const codigo of unico) {
-      resueltas.push(await this.upsertMateriaPorCodigo(codigo));
-    }
-    return resueltas;
-  }
-
-  private async upsertCarreraPorNombre(nombre: string): Promise<CarreraEntidad> {
-    const limpio = nombre.trim();
-    if (!limpio) throw new BadRequestException('La carrera es obligatoria.');
-    const existente = await this.carrerasRepo.findOne({ where: { nombre: limpio } });
-    if (existente) return existente;
-    const creado = this.carrerasRepo.create({ nombre: limpio });
-    return this.carrerasRepo.save(creado);
-  }
-
-  async obtenerMaterias(): Promise<MateriaEntidad[]> {
-    return this.materiasRepo.find({ where: { deletedAt: IsNull() }, order: { codigo: 'ASC' } });
-  }
-
-  async crearMateria(datos: { codigo: string; nombre?: string | null }): Promise<MateriaEntidad> {
-    const codigo = this.normalizarCodigo(datos.codigo);
-    if (!codigo) throw new BadRequestException('El código de materia es obligatorio.');
-    const existente = await this.materiasRepo.findOne({ where: { codigo } });
-    if (existente) throw new BadRequestException('La materia ya está registrada.');
-    const materia = this.materiasRepo.create({ codigo, nombre: (datos.nombre ?? null)?.toString().trim() || null });
-    return this.materiasRepo.save(materia);
-  }
-
-  async editarMateria(id: number, datos: Partial<{ codigo: string; nombre: string | null }>): Promise<MateriaEntidad> {
-    const materia = await this.materiasRepo.findOne({ where: { id } });
-    if (!materia) throw new NotFoundException('Materia no encontrada.');
-
-    if (typeof datos.codigo === 'string' && this.normalizarCodigo(datos.codigo) && this.normalizarCodigo(datos.codigo) !== materia.codigo) {
-      const nuevoCodigo = this.normalizarCodigo(datos.codigo);
-      const existente = await this.materiasRepo.findOne({ where: { codigo: nuevoCodigo } });
-      if (existente) throw new BadRequestException('El código de materia ya está registrado.');
-      materia.codigo = nuevoCodigo;
-    }
-
-    if (datos.nombre === null) materia.nombre = null;
-    if (typeof datos.nombre === 'string') materia.nombre = datos.nombre.trim() || null;
-
-    return this.materiasRepo.save(materia);
-  }
-
-  async eliminarMateria(id: number): Promise<void> {
-    const materia = await this.materiasRepo.findOne({ where: { id }, relations: ['docentes'] });
-    if (!materia) throw new NotFoundException('Materia no encontrada.');
-    if ((materia.docentes ?? []).length > 0) {
-      throw new BadRequestException('La materia está asignada a docentes. Primero desasigna la materia de todos los docentes.');
-    }
-    await this.materiasRepo.softRemove(materia);
-  }
-
-  async obtenerCarreras(): Promise<CarreraEntidad[]> {
-    return this.carrerasRepo.find({ where: { deletedAt: IsNull() }, order: { nombre: 'ASC' } });
-  }
-
-  async crearCarrera(datos: { nombre: string }): Promise<CarreraEntidad> {
-    const nombre = datos.nombre.trim();
-    if (!nombre) throw new BadRequestException('El nombre de la carrera es obligatorio.');
-    const existente = await this.carrerasRepo.findOne({ where: { nombre } });
-    if (existente) throw new BadRequestException('La carrera ya está registrada.');
-    const carrera = this.carrerasRepo.create({ nombre });
-    return this.carrerasRepo.save(carrera);
-  }
-
-  async editarCarrera(id: number, datos: Partial<{ nombre: string }>): Promise<CarreraEntidad> {
-    const carrera = await this.carrerasRepo.findOne({ where: { id } });
-    if (!carrera) throw new NotFoundException('Carrera no encontrada.');
-    if (typeof datos.nombre === 'string' && datos.nombre.trim() && datos.nombre.trim() !== carrera.nombre) {
-      const nuevoNombre = datos.nombre.trim();
-      const existente = await this.carrerasRepo.findOne({ where: { nombre: nuevoNombre } });
-      if (existente) throw new BadRequestException('La carrera ya está registrada.');
-      carrera.nombre = nuevoNombre;
-    }
-    return this.carrerasRepo.save(carrera);
-  }
-
-  async eliminarCarrera(id: number): Promise<void> {
-    const carrera = await this.carrerasRepo.findOne({ where: { id }, relations: ['estudiantes'] });
-    if (!carrera) throw new NotFoundException('Carrera no encontrada.');
-    if ((carrera.estudiantes ?? []).length > 0) {
-      throw new BadRequestException('La carrera está asignada a estudiantes. Primero actualiza esos estudiantes a otra carrera.');
-    }
-    await this.carrerasRepo.softRemove(carrera);
-  }
-
-  private estadoCalculado(estadoActual: string, fechaDevolucion: Date | null | undefined): 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite' {
-    if (estadoActual === 'devuelto') return 'devuelto';
-    if (estadoActual === 'devuelto_fuera_de_fecha_limite') return 'devuelto_fuera_de_fecha_limite';
-    if (estadoActual === 'activo') {
-      if (!fechaDevolucion) return 'activo';
-      return new Date(fechaDevolucion).getTime() < Date.now() ? 'vencido' : 'activo';
-    }
-    if (!fechaDevolucion) return 'pendiente';
-    return new Date(fechaDevolucion).getTime() < Date.now() ? 'vencido' : 'pendiente';
-  }
-
-  private estadoDevolucionFinal(fechaLimite: Date | null | undefined): 'devuelto' | 'devuelto_fuera_de_fecha_limite' {
-    if (!fechaLimite) return 'devuelto';
-    return Date.now() > new Date(fechaLimite).getTime()
-      ? 'devuelto_fuera_de_fecha_limite'
-      : 'devuelto';
-  }
-
-  private parsearIdItem(idHerramienta: string): string {
-    const limpio = String(idHerramienta ?? '').trim();
-    if (!limpio) {
-      throw new BadRequestException('El identificador del item de activo no es válido.');
-    }
-    return limpio;
-  }
-
-  private async obtenerItemActivo(idHerramienta: string): Promise<ItemActivoFijo> {
-    const idItem = this.parsearIdItem(idHerramienta);
-    const item = await this.itemsActivosRepo.findOne({ where: { id: idItem }, relations: ['activo'] });
-    if (!item) throw new NotFoundException('Item de activo no encontrado.');
-    return item;
-  }
-
-  private async validarDisponibilidadItem(idHerramienta: string, excluirPrestamoId?: number, itemActivo?: ItemActivoFijo) {
-    const item = itemActivo ?? (await this.obtenerItemActivo(idHerramienta));
-    const estadoItem = normalizarEstadoItem(item.estado);
-    if (estadoItem !== 'disponible') {
-      throw new BadRequestException(`El item no está disponible para préstamo (estado actual: ${estadoItem}).`);
-    }
-
-    const qb = this.prestamosRepo
-      .createQueryBuilder('p')
-      .where('p.codigo_herramienta = :idHerramienta', { idHerramienta })
-      .andWhere('p.estado NOT IN (:...estadosCerrados)', { estadosCerrados: ['devuelto', 'devuelto_fuera_de_fecha_limite'] })
-      .andWhere('p.deleted_at IS NULL');
-
-    if (typeof excluirPrestamoId === 'number') {
-      qb.andWhere('p.id <> :excluirPrestamoId', { excluirPrestamoId });
-    }
-
-    const enUso = await qb.getCount();
-    if (enUso > 0) {
-      throw new BadRequestException('El item seleccionado ya tiene un préstamo activo y no puede volver a prestarse hasta su devolución.');
-    }
-  }
-
-  private async marcarItemEnPrestamo(item: ItemActivoFijo) {
-    const actual = normalizarEstadoItem(item.estado);
-    if (actual === 'disponible') {
-      item.estado = 'en_prestamo';
-      await this.itemsActivosRepo.save(item);
-    }
-  }
-
-  private async marcarItemDisponibleAlDevolver(item: ItemActivoFijo) {
-    const actual = normalizarEstadoItem(item.estado);
-    if (actual === 'en_prestamo') {
-      item.estado = 'disponible';
-      await this.itemsActivosRepo.save(item);
-    }
-  }
-
   private mapPrestamoDto(p: PrestamoEntidad) {
+    const nombreDocente = this.util.obtenerNombreCompletoDocente(p.docente);
     return {
       id: p.id,
       carnetEstudiante: p.estudiante?.carnet,
       idHerramienta: p.codigoHerramienta,
       grupoCanasta: p.grupoCanasta ?? null,
+      codigo: p.codigo ?? null,
       idDocente: p.docente?.id,
       fechaPrestamo: p.fechaPrestamo,
       fechaDevolucion: p.fechaDevolucion,
       estado: p.estado,
-      docente: p.docente ? `${p.docente.nombre} ${p.docente.apellido}` : '',
+      docente: nombreDocente,
       observaciones: p.observaciones ?? '',
     };
   }
+  async obtenerPrestamos(ejecutor?: any) {
+    await this.util.marcarVencidosEnLote();
+    await this.util.sincronizarCarnetsRetenidosEnLote();
 
-  private mapCanastaDto(
-    prestamos: PrestamoEntidad[],
-    consumibles: Array<{
-      idLote: string;
-      lote: string;
-      material: string;
-      cantidad: number;
-      motivo: string;
-      fecha: Date;
-    }> = [],
-    estudiantesCanasta: EstudianteEntidad[] = [],
-  ) {
-    const primero = prestamos[0];
-    const idCanasta = primero.grupoCanasta ?? `IND-${primero.id}`;
-    const estudiantes = estudiantesCanasta.length > 0
-      ? estudiantesCanasta
-      : (primero.estudiante ? [primero.estudiante] : []);
-    const estados = prestamos.map((p) => p.estado);
+    const queryBuilder = this.util.prestamosRepo.createQueryBuilder('p')
+      .leftJoinAndSelect('p.estudiante', 'estudiante')
+      .leftJoinAndSelect('estudiante.usuario', 'estudianteUsuario')
+      .leftJoinAndSelect('p.docente', 'docente')
+      .leftJoinAndSelect('p.itemActivo', 'itemActivo')
+      .leftJoinAndSelect('itemActivo.activo', 'activo')
+      .leftJoinAndSelect('activo.inventario', 'inventario')
+      .leftJoinAndSelect('p.inventario', 'inventarioPrestamo')
+      .orderBy('p.fecha_prestamo', 'DESC')
+      .addOrderBy('p.id', 'DESC');
 
-    const estadoCanasta: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite' = estados.includes('vencido')
-      ? 'vencido'
-      : estados.includes('activo')
-        ? 'activo'
-        : estados.includes('pendiente')
-          ? 'pendiente'
-          : estados.includes('devuelto_fuera_de_fecha_limite')
-            ? 'devuelto_fuera_de_fecha_limite'
-            : 'devuelto';
+    if (ejecutor) {
+      if (ejecutor.rol === 'docente') {
+        queryBuilder.andWhere('docente.id = :ejecutorId', { ejecutorId: ejecutor.id });
+      } else if (ejecutor.rol === 'estudiante') {
+        const estudiante = await this.util.estudiantesRepo.findOne({ where: { usuario: { id: ejecutor.id } } });
+        if (estudiante) {
+          const participaciones = await this.util.canastaEstudiantesRepo.find({ where: { estudiante: { id: estudiante.id } } });
+          const gruposCanasta = Array.from(new Set(participaciones.map(p => p.grupoCanasta).filter(Boolean)));
+          if (gruposCanasta.length > 0) {
+            queryBuilder.andWhere('(p.id_estudiante = :estudianteId OR p.grupo_canasta IN (:...gruposCanasta))', {
+              estudianteId: estudiante.id,
+              gruposCanasta,
+            });
+          } else {
+            queryBuilder.andWhere('p.id_estudiante = :estudianteId', { estudianteId: estudiante.id });
+          }
+        } else {
+          queryBuilder.andWhere('p.id = -1');
+        }
+      } else if (ejecutor.rol === 'encargado_inventario') {
+        const encargado = await this.util.encargadosRepo.findOne({
+          where: { usuario: { id: ejecutor.id } },
+          relations: ['inventario'],
+        });
+        if (encargado?.inventario) {
+          const idInventario = encargado.inventario.id;
+          const fungiblesInventario = await this.util.itemsFungiblesRepo.find({
+            where: { activo: { inventario: { id: idInventario } } },
+            select: ['id'],
+          });
+          const idsFungibles = fungiblesInventario.map(f => f.id);
 
-    return {
-      id: idCanasta,
-      grupoCanasta: primero.grupoCanasta ?? null,
-      idsPrestamo: prestamos.map((p) => p.id),
-      carnetEstudiante: estudiantes[0]?.carnet ?? primero.estudiante?.carnet ?? '',
-      carnetsEstudiantes: estudiantes.map((estudiante) => estudiante.carnet),
-      estudiantes: estudiantes.map((estudiante) => ({
-        id: estudiante.id,
-        carnet: estudiante.carnet,
-        nombre: estudiante.nombre,
-        apellido: estudiante.apellido,
-      })),
-      idDocente: primero.docente?.id,
-      docente: primero.docente ? `${primero.docente.nombre} ${primero.docente.apellido}` : '',
-      fechaPrestamo: primero.fechaPrestamo,
-      fechaDevolucion: primero.fechaDevolucion,
-      estado: estadoCanasta,
-      observaciones: primero.observaciones ?? '',
-      cosas: prestamos.map((p) => ({
-        idHerramienta: p.codigoHerramienta,
-        codigoInventario: (p.itemActivo as any)?.codigo_inventario ?? p.codigoHerramienta,
-        nombre: p.itemActivo?.activo?.nombre ?? 'Activo',
-      })),
-      consumibles,
-      totalActivos: prestamos.length,
-      totalConsumibles: consumibles.reduce((acc, c) => acc + c.cantidad, 0),
-      totalCosas: prestamos.length + consumibles.reduce((acc, c) => acc + c.cantidad, 0),
-    };
-  }
-
-  private async obtenerConsumiblesPorReferencias(
-    referencias: string[],
-  ): Promise<
-    Map<
-      string,
-      Array<{
-        idLote: string;
-        lote: string;
-        material: string;
-        cantidad: number;
-        motivo: string;
-        fecha: Date;
-      }>
-    >
-  > {
-    const mapa = new Map<
-      string,
-      Array<{
-        idLote: string;
-        lote: string;
-        material: string;
-        cantidad: number;
-        motivo: string;
-        fecha: Date;
-      }>
-    >();
-
-    const limpias = Array.from(new Set((referencias ?? []).map((r) => r?.trim()).filter(Boolean) as string[]));
-    if (limpias.length === 0) return mapa;
-
-    const movimientos = await this.movimientosMaterialRepo.find({
-      where: limpias.map((ref) => ({ referencia: ref, tipo: 'salida' as const })),
-      relations: ['lote', 'lote.material'],
-      order: { fecha: 'ASC', id: 'ASC' },
-    });
-
-    for (const mov of movimientos) {
-      const ref = (mov.referencia ?? '').trim();
-      if (!ref) continue;
-
-      const lista = mapa.get(ref) ?? [];
-      lista.push({
-        idLote: mov.lote?.id ?? '',
-        lote: mov.lote?.lote ?? mov.lote?.serie ?? '',
-        material: mov.lote?.material?.nombre ?? 'Material',
-        cantidad: Number(mov.cantidad ?? 0),
-        motivo: mov.motivo ?? '',
-        fecha: mov.fecha,
-      });
-      mapa.set(ref, lista);
-    }
-
-    return mapa;
-  }
-
-  private async resolverEstudiantesPorCarnets(carnetsEntrada: string[]): Promise<EstudianteEntidad[]> {
-    const carnets = Array.from(new Set((carnetsEntrada ?? []).map((carnet) => carnet?.trim()).filter(Boolean) as string[]));
-    if (carnets.length === 0) {
-      throw new BadRequestException('Debes seleccionar al menos un estudiante.');
-    }
-
-    const estudiantes = await this.estudiantesRepo.find({ where: carnets.map((carnet) => ({ carnet })) });
-    if (estudiantes.length !== carnets.length) {
-      const encontrados = new Set(estudiantes.map((estudiante) => estudiante.carnet));
-      const faltantes = carnets.filter((carnet) => !encontrados.has(carnet));
-      throw new NotFoundException(`Estudiante no encontrado: ${faltantes.join(', ')}`);
-    }
-
-    return carnets
-      .map((carnet) => estudiantes.find((estudiante) => estudiante.carnet === carnet))
-      .filter((estudiante): estudiante is EstudianteEntidad => !!estudiante);
-  }
-
-  private async obtenerEstudiantesCanasta(grupoCanasta: string): Promise<EstudianteEntidad[]> {
-    if (!grupoCanasta?.trim()) return [];
-
-    const participantes = await this.canastaEstudiantesRepo.find({
-      where: { grupoCanasta: grupoCanasta.trim() },
-      relations: ['estudiante'],
-      order: { id: 'ASC' },
-    });
-
-    return participantes.map((participante) => participante.estudiante).filter((estudiante) => !!estudiante);
-  }
-
-  private async obtenerEstudiantesPorCanastas(gruposCanasta: string[]): Promise<Map<string, EstudianteEntidad[]>> {
-    const mapa = new Map<string, EstudianteEntidad[]>();
-    const grupos = Array.from(new Set((gruposCanasta ?? []).map((grupo) => grupo?.trim()).filter(Boolean) as string[]));
-    if (grupos.length === 0) return mapa;
-
-    const participantes = await this.canastaEstudiantesRepo.find({
-      where: grupos.map((grupoCanasta) => ({ grupoCanasta })),
-      relations: ['estudiante'],
-      order: { id: 'ASC' },
-    });
-
-    for (const participante of participantes) {
-      const lista = mapa.get(participante.grupoCanasta) ?? [];
-      lista.push(participante.estudiante);
-      mapa.set(participante.grupoCanasta, lista);
-    }
-
-    return mapa;
-  }
-
-  private async reemplazarEstudiantesCanasta(grupoCanasta: string, estudiantes: EstudianteEntidad[]): Promise<void> {
-    await this.canastaEstudiantesRepo.delete({ grupoCanasta });
-    if (estudiantes.length === 0) return;
-
-    await this.canastaEstudiantesRepo.save(
-      estudiantes.map((estudiante) => this.canastaEstudiantesRepo.create({ grupoCanasta, estudiante })),
-    );
-  }
-
-  private async resolverPrestamosPorCanastaId(canastaId: string): Promise<PrestamoEntidad[]> {
-    if (!canastaId?.trim()) {
-      throw new BadRequestException('Identificador de canasta no válido.');
-    }
-
-    const limpio = canastaId.trim();
-    if (limpio.startsWith('IND-')) {
-      const id = Number(limpio.replace('IND-', ''));
-      if (!Number.isInteger(id) || id <= 0) {
-        throw new BadRequestException('Identificador de canasta individual no válido.');
-      }
-
-      const unico = await this.prestamosRepo.findOne({
-        where: { id },
-        relations: ['estudiante', 'docente', 'itemActivo', 'itemActivo.activo'],
-      });
-      if (!unico || unico.deletedAt) {
-        throw new NotFoundException('Canasta no encontrada.');
-      }
-      return [unico];
-    }
-
-    const items = await this.prestamosRepo.find({
-      where: { grupoCanasta: limpio },
-      relations: ['estudiante', 'docente', 'itemActivo', 'itemActivo.activo'],
-      order: { id: 'ASC' },
-    });
-
-    const vigentes = items.filter((p) => !p.deletedAt);
-    if (vigentes.length === 0) {
-      throw new NotFoundException('Canasta no encontrada.');
-    }
-
-    return vigentes;
-  }
-
-  async obtenerCanastasPrestamo() {
-    await this.marcarVencidosEnLote();
-    await this.sincronizarCarnetsRetenidosEnLote();
-
-    const prestamos = await this.prestamosRepo.find({
-      relations: ['estudiante', 'docente', 'itemActivo', 'itemActivo.activo'],
-      order: { id: 'ASC' },
-    });
-
-    const vigentes = prestamos.filter((p) => !p.deletedAt);
-    const grupos = new Map<string, PrestamoEntidad[]>();
-
-    for (const p of vigentes) {
-      const clave = p.grupoCanasta ?? `IND-${p.id}`;
-      const lista = grupos.get(clave) ?? [];
-      lista.push(p);
-      grupos.set(clave, lista);
-    }
-
-    const referencias = Array.from(grupos.keys()).filter((k) => !k.startsWith('IND-'));
-    const consumiblesPorCanasta = await this.obtenerConsumiblesPorReferencias(referencias);
-    const estudiantesPorCanasta = await this.obtenerEstudiantesPorCanastas(referencias);
-
-    return Array.from(grupos.entries()).map(([clave, lista]) =>
-      this.mapCanastaDto(
-        lista,
-        consumiblesPorCanasta.get(clave) ?? [],
-        clave.startsWith('IND-') ? [lista[0].estudiante] : (estudiantesPorCanasta.get(clave) ?? [lista[0].estudiante]),
-      ),
-    );
-  }
-
-  async editarCanastaPrestamo(
-    canastaId: string,
-    datos: Partial<{
-      carnetEstudiante: string;
-      carnetsEstudiantes: string[];
-      fechaPrestamo: string;
-      fechaDevolucion: string | null;
-      observaciones: string;
-      idDocente: number;
-      estado: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite';
-    }>,
-  ) {
-    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
-    const grupoCanasta = prestamos[0].grupoCanasta ?? null;
-    const estudiantesPrevios = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
-    const idsPrevios = estudiantesPrevios.map((estudiante) => estudiante.id);
-
-    let estudiantesDestino = estudiantesPrevios;
-    if (Array.isArray(datos.carnetsEstudiantes) && datos.carnetsEstudiantes.length > 0) {
-      estudiantesDestino = await this.resolverEstudiantesPorCarnets(datos.carnetsEstudiantes);
-    } else if (typeof datos.carnetEstudiante === 'string' && datos.carnetEstudiante.trim()) {
-      estudiantesDestino = await this.resolverEstudiantesPorCarnets([datos.carnetEstudiante]);
-    }
-    const estudianteDestino = estudiantesDestino[0];
-
-    let docenteDestino = prestamos[0].docente;
-    if (typeof datos.idDocente === 'number') {
-      const encontrado = await this.docentesRepo.findOne({ where: { id: Number(datos.idDocente) } });
-      if (!encontrado) throw new NotFoundException('Docente no encontrado.');
-      docenteDestino = encontrado;
-    }
-
-    const fechaPrestamoDestino = datos.fechaPrestamo ? new Date(datos.fechaPrestamo) : prestamos[0].fechaPrestamo;
-    const fechaDevolucionDestino = datos.fechaDevolucion !== undefined
-      ? (datos.fechaDevolucion ? new Date(datos.fechaDevolucion) : null)
-      : prestamos[0].fechaDevolucion;
-
-    if (Number.isNaN(fechaPrestamoDestino.getTime())) {
-      throw new BadRequestException('Fecha de préstamo inválida.');
-    }
-    if (fechaDevolucionDestino && Number.isNaN(fechaDevolucionDestino.getTime())) {
-      throw new BadRequestException('Fecha de devolución inválida.');
-    }
-    if (fechaDevolucionDestino && fechaDevolucionDestino.getTime() <= fechaPrestamoDestino.getTime()) {
-      throw new BadRequestException('La fecha de devolución debe ser posterior a la fecha de préstamo.');
-    }
-
-    for (const p of prestamos) {
-      p.estudiante = estudianteDestino;
-      p.docente = docenteDestino;
-      p.fechaPrestamo = fechaPrestamoDestino;
-      p.fechaDevolucion = fechaDevolucionDestino;
-
-      if (typeof datos.observaciones === 'string') {
-        p.observaciones = datos.observaciones.trim();
-      }
-
-      p.estado = this.estadoCalculado(datos.estado ?? p.estado, p.fechaDevolucion);
-      if (datos.estado === 'devuelto') {
-        p.estado = this.estadoDevolucionFinal(p.fechaDevolucion);
-      }
-
-      await this.prestamosRepo.save(p);
-    }
-
-    if (grupoCanasta) {
-      await this.reemplazarEstudiantesCanasta(grupoCanasta, estudiantesDestino);
-    }
-
-    const idsRecalcular = Array.from(new Set([...idsPrevios, ...estudiantesDestino.map((estudiante) => estudiante.id)]));
-    for (const idEstudiante of idsRecalcular) {
-      await this.sincronizarCarnetRetenidoEstudiante(idEstudiante);
-    }
-    await this.sincronizarCarnetsRetenidosEnLote();
-
-    const recargados = await this.resolverPrestamosPorCanastaId(canastaId);
-    const consumiblesPorCanasta = await this.obtenerConsumiblesPorReferencias([canastaId]);
-    const estudiantesCanasta = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [recargados[0].estudiante];
-    return this.mapCanastaDto(recargados, consumiblesPorCanasta.get(canastaId) ?? [], estudiantesCanasta);
-  }
-
-  async extenderCanastaPrestamo(canastaId: string, fechaDevolucion: string) {
-    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
-    const grupoCanasta = prestamos[0].grupoCanasta ?? null;
-    const nuevaFecha = new Date(fechaDevolucion);
-    if (Number.isNaN(nuevaFecha.getTime())) throw new BadRequestException('Nueva fecha de devolución inválida.');
-
-    for (const p of prestamos) {
-      if (nuevaFecha.getTime() <= p.fechaPrestamo.getTime()) {
-        throw new BadRequestException('La nueva fecha de devolución debe ser posterior a la fecha de préstamo.');
-      }
-      p.fechaDevolucion = nuevaFecha;
-      p.estado = this.estadoCalculado('activo', nuevaFecha);
-      await this.prestamosRepo.save(p);
-    }
-
-    const estudiantesCanasta = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
-    for (const estudiante of estudiantesCanasta) {
-      await this.sincronizarCarnetRetenidoEstudiante(estudiante.id);
-    }
-    await this.sincronizarCarnetsRetenidosEnLote();
-
-    const recargados = await this.resolverPrestamosPorCanastaId(canastaId);
-    const consumiblesPorCanasta = await this.obtenerConsumiblesPorReferencias([canastaId]);
-    return this.mapCanastaDto(recargados, consumiblesPorCanasta.get(canastaId) ?? [], estudiantesCanasta);
-  }
-
-  async devolverCanastaPrestamo(canastaId: string) {
-    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
-    const grupoCanasta = prestamos[0].grupoCanasta ?? null;
-
-    for (const p of prestamos) {
-      p.estado = this.estadoDevolucionFinal(p.fechaDevolucion);
-      await this.prestamosRepo.save(p);
-
-      if (p.itemActivo) {
-        await this.marcarItemDisponibleAlDevolver(p.itemActivo);
-      } else {
-        try {
-          const item = await this.obtenerItemActivo(p.codigoHerramienta);
-          await this.marcarItemDisponibleAlDevolver(item);
-        } catch {
-          // Si no se puede resolver (datos legacy), no bloquea la devolución.
+          queryBuilder.andWhere(new Brackets(qb => {
+            qb.where('inventarioPrestamo.id = :idInventario', { idInventario })
+              .orWhere('inventario.id = :idInventario', { idInventario });
+            if (idsFungibles.length > 0) {
+              qb.orWhere(`EXISTS (
+                SELECT 1 
+                FROM jsonb_to_recordset(COALESCE(p.consumibles, '[]'::jsonb)) as x("idLote" text) 
+                WHERE x."idLote" IN (:...idsFungibles)
+              )`, { idsFungibles });
+            }
+          }));
+        } else {
+          queryBuilder.andWhere('p.id = -1');
         }
       }
     }
 
-    const estudiantesCanasta = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
-    for (const estudiante of estudiantesCanasta) {
-      await this.sincronizarCarnetRetenidoEstudiante(estudiante.id);
-    }
-    await this.sincronizarCarnetsRetenidosEnLote();
-
-    const recargados = await this.resolverPrestamosPorCanastaId(canastaId);
-    const consumiblesPorCanasta = await this.obtenerConsumiblesPorReferencias([canastaId]);
-    return this.mapCanastaDto(recargados, consumiblesPorCanasta.get(canastaId) ?? [], estudiantesCanasta);
+    const prestamos = await queryBuilder.getMany();
+    return prestamos.map((p) => this.mapPrestamoDto(p));
   }
 
-  async eliminarCanastaPrestamo(canastaId: string): Promise<void> {
-    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
-    const grupoCanasta = prestamos[0].grupoCanasta ?? null;
-    const estudiantesCanasta = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
-    await this.prestamosRepo.softRemove(prestamos);
-    if (grupoCanasta) {
-      await this.canastaEstudiantesRepo.delete({ grupoCanasta });
-    }
-    for (const estudiante of estudiantesCanasta) {
-      await this.sincronizarCarnetRetenidoEstudiante(estudiante.id);
-    }
-    await this.sincronizarCarnetsRetenidosEnLote();
-  }
-
-  private async marcarVencidosEnLote() {
-    await this.prestamosRepo
-      .createQueryBuilder()
-      .update(PrestamoEntidad)
-      .set({ estado: 'vencido' })
-      .where('estado IN (:...estados)', { estados: ['pendiente', 'activo'] })
-      .andWhere('deleted_at IS NULL')
-      .andWhere('fecha_devolucion IS NOT NULL')
-      .andWhere('fecha_devolucion < NOW()')
-      .execute();
-  }
-
-  private async sincronizarCarnetsRetenidosEnLote() {
-    const estadosActivos = ['pendiente', 'vencido', 'activo'];
-
-    await this.estudiantesRepo
-      .createQueryBuilder()
-      .update(EstudianteEntidad)
-      .set({ carnetRetenido: true })
-      .where('carnet_retenido = false')
-      .andWhere('carnet_retenido_override IS NULL')
-      .andWhere(
-        `id IN (
-          SELECT DISTINCT p.id_estudiante
-          FROM prestamos p
-          WHERE p.estado IN (:...estadosActivos)
-            AND p.deleted_at IS NULL
-          UNION
-          SELECT DISTINCT ce.id_estudiante
-          FROM canasta_estudiantes ce
-          INNER JOIN prestamos p ON p.grupo_canasta = ce.grupo_canasta
-          WHERE p.estado IN (:...estadosActivos)
-            AND p.deleted_at IS NULL
-        )`,
-        { estadosActivos },
-      )
-      .execute();
-
-    await this.estudiantesRepo
-      .createQueryBuilder()
-      .update(EstudianteEntidad)
-      .set({ carnetRetenido: false })
-      .where('carnet_retenido = true')
-      .andWhere('carnet_retenido_override IS NULL')
-      .andWhere(
-        `id NOT IN (
-          SELECT DISTINCT p.id_estudiante
-          FROM prestamos p
-          WHERE p.estado IN (:...estadosActivos)
-            AND p.deleted_at IS NULL
-          UNION
-          SELECT DISTINCT ce.id_estudiante
-          FROM canasta_estudiantes ce
-          INNER JOIN prestamos p ON p.grupo_canasta = ce.grupo_canasta
-          WHERE p.estado IN (:...estadosActivos)
-            AND p.deleted_at IS NULL
-        )`,
-        { estadosActivos },
-      )
-      .execute();
-  }
-
-  private async sincronizarCarnetRetenidoEstudiante(idEstudiante: number) {
-    const estudiante = await this.estudiantesRepo.findOne({ where: { id: idEstudiante } });
-    if (!estudiante) return;
-
-    // Si hay override manual, este manda y no se recalcula por préstamos.
-    if (typeof estudiante.carnetRetenidoOverride === 'boolean') {
-      if (estudiante.carnetRetenido !== estudiante.carnetRetenidoOverride) {
-        estudiante.carnetRetenido = estudiante.carnetRetenidoOverride;
-        await this.estudiantesRepo.save(estudiante);
-      }
-      return;
-    }
-
-    const activos = await this.prestamosRepo
-      .createQueryBuilder('p')
-      .where('p.id_estudiante = :idEstudiante', { idEstudiante })
-      .andWhere('p.estado IN (:...estados)', { estados: ['pendiente', 'vencido', 'activo'] })
-      .andWhere('p.deleted_at IS NULL')
-      .getCount();
-
-    const activosCanasta = await this.canastaEstudiantesRepo
-      .createQueryBuilder('ce')
-      .innerJoin(PrestamoEntidad, 'p', 'p.grupo_canasta = ce.grupoCanasta AND p.estado IN (:...estados) AND p.deleted_at IS NULL', {
-        estados: ['pendiente', 'vencido', 'activo'],
-      })
-      .where('ce.id_estudiante = :idEstudiante', { idEstudiante })
-      .getCount();
-
-    const nuevoValor = activos > 0 || activosCanasta > 0;
-    if (nuevoValor === estudiante.carnetRetenido) return;
-    estudiante.carnetRetenido = nuevoValor;
-    await this.estudiantesRepo.save(estudiante);
-  }
-
-  async obtenerEstudiantes(): Promise<EstudianteEntidad[]> {
-    await this.marcarVencidosEnLote();
-    await this.sincronizarCarnetsRetenidosEnLote();
-    return this.estudiantesRepo.find({ order: { apellido: 'ASC', nombre: 'ASC', carnet: 'ASC' } });
-  }
-
-  async obtenerDocentes(): Promise<DocenteEntidad[]> {
-    return this.docentesRepo.find({ relations: ['materias'], order: { apellido: 'ASC', nombre: 'ASC', codigo: 'ASC' } });
-  }
-
-  async obtenerPrestamos() {
-    await this.marcarVencidosEnLote();
-    await this.sincronizarCarnetsRetenidosEnLote();
-    const prestamos = await this.prestamosRepo.find({
-      relations: ['estudiante', 'docente', 'itemActivo'],
-      order: { id: 'ASC' },
-    });
-
-    return prestamos.map((p: PrestamoEntidad) => this.mapPrestamoDto(p));
-  }
 
   async crearPrestamo(datos: {
     carnetEstudiante: string;
@@ -756,179 +120,61 @@ export class PrestamoServicio {
     fechaPrestamo: string;
     fechaDevolucion: string;
     observaciones?: string;
-  }) {
-    const estudiante = await this.estudiantesRepo.findOne({ where: { carnet: datos.carnetEstudiante } });
+    carnetRetenido?: boolean;
+  }, ejecutor?: any) {
+    const estudiante = await this.util.estudiantesRepo.findOne({ where: { carnet: datos.carnetEstudiante } });
     if (!estudiante) throw new NotFoundException('Estudiante no encontrado.');
+    if (estudiante.carnetRetenido) {
+      throw new BadRequestException(`El estudiante ${estudiante.nombre} ${estudiante.apellido} (${estudiante.carnet}) tiene su carnet retenido.`);
+    }
 
-    const docente = await this.docentesRepo.findOne({ where: { id: Number(datos.idDocente) } });
-    if (!docente) throw new NotFoundException('Docente no encontrado.');
-
+    const docente = await this.util.obtenerDocenteUsuarioPorId(Number(datos.idDocente));
     const fechaPrestamo = new Date(datos.fechaPrestamo);
     const fechaDevolucion = new Date(datos.fechaDevolucion);
     if (Number.isNaN(fechaPrestamo.getTime()) || Number.isNaN(fechaDevolucion.getTime())) {
-      throw new BadRequestException('Las fechas de préstamo/devolución no son válidas.');
+      throw new BadRequestException('Fechas no válidas.');
     }
     if (fechaDevolucion.getTime() <= fechaPrestamo.getTime()) {
-      throw new BadRequestException('La fecha de devolución debe ser posterior a la fecha de préstamo.');
+      throw new BadRequestException('Fecha de devolución debe ser posterior.');
     }
 
     const idHerramienta = datos.idHerramienta.trim();
-    if (!idHerramienta) {
-      throw new BadRequestException('Debes seleccionar un item de activo válido.');
+    if (!idHerramienta) throw new BadRequestException('Debes seleccionar un item.');
+
+    const itemActivo = await this.util.obtenerItemActivo(idHerramienta);
+    const estadoInicial = ejecutor?.rol === 'docente' ? 'solicitado' : 'despachado';
+    if (estadoInicial === 'despachado') {
+      await this.util.validarDisponibilidadItem(idHerramienta, undefined, itemActivo);
     }
 
-    const itemActivo = await this.obtenerItemActivo(idHerramienta);
-    await this.validarDisponibilidadItem(idHerramienta, undefined, itemActivo);
-
-    const prestamo = this.prestamosRepo.create({
+    const codigo = this.util.generarCodigoPrestamo(fechaPrestamo, estudiante.carnet, idHerramienta);
+    const prestamo = this.util.prestamosRepo.create({
       estudiante,
       docente,
       codigoHerramienta: idHerramienta,
       fechaPrestamo,
       fechaDevolucion,
-      estado: this.estadoCalculado('activo', fechaDevolucion),
+      estado: estadoInicial,
       observaciones: datos.observaciones?.trim() || '',
       itemActivo,
+      codigo,
+      carnetRetenido: datos.carnetRetenido !== undefined ? datos.carnetRetenido : (estadoInicial === 'despachado'),
+      inventario: itemActivo?.activo?.inventario ?? { id: 1 } as any,
     });
 
-    const guardado = await this.prestamosRepo.save(prestamo);
-    await this.sincronizarCarnetRetenidoEstudiante(estudiante.id);
-    await this.sincronizarCarnetsRetenidosEnLote();
-    const completo = await this.prestamosRepo.findOne({ where: { id: guardado.id }, relations: ['estudiante', 'docente', 'itemActivo'] });
-    if (!completo) throw new NotFoundException('No se pudo recuperar el préstamo creado.');
-    await this.registrarEventoInterno({
-      entidad: 'Prestamo',
-      entidadId: completo.id,
-      accion: 'crear',
-      detalle: this.mapPrestamoDto(completo),
-    });
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+    if (estadoInicial === 'despachado') {
+      await this.util.marcarItemEnPrestamo(itemActivo);
+    }
+
+    await this.util.sincronizarCarnetRetenidoEstudiante(estudiante.id);
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+
+    const completo = await this.util.prestamosRepo.findOne({ where: { id: guardado.id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    if (!completo) throw new NotFoundException('No se pudo recuperar el préstamo.');
+
+    await this.util.registrarCambioHistorial(completo, 'creacion_solicitud', completo.estado, estadoInicial === 'solicitado' ? 'Préstamo solicitado.' : 'Préstamo creado.', ejecutor);
     return this.mapPrestamoDto(completo);
-  }
-
-  async crearCanastaPrestamo(datos: {
-    carnetEstudiante?: string;
-    carnetsEstudiantes?: string[];
-    idDocente: number;
-    fechaPrestamo: string;
-    fechaDevolucion: string;
-    observaciones?: string;
-    equipos: string[];
-    consumibles: Array<{ idLote: string; cantidad: number; motivo: string }>;
-  }) {
-    const estudiantes = await this.resolverEstudiantesPorCarnets(datos.carnetsEstudiantes?.length ? datos.carnetsEstudiantes : [datos.carnetEstudiante ?? '']);
-    const estudiante = estudiantes[0];
-
-    const docente = await this.docentesRepo.findOne({ where: { id: Number(datos.idDocente) } });
-    if (!docente) throw new NotFoundException('Docente no encontrado.');
-
-    const fechaPrestamo = new Date(datos.fechaPrestamo);
-    const fechaDevolucion = new Date(datos.fechaDevolucion);
-    if (Number.isNaN(fechaPrestamo.getTime()) || Number.isNaN(fechaDevolucion.getTime())) {
-      throw new BadRequestException('Las fechas de la canasta no son válidas.');
-    }
-    if (fechaDevolucion.getTime() <= fechaPrestamo.getTime()) {
-      throw new BadRequestException('La fecha de devolución debe ser posterior a la fecha de préstamo.');
-    }
-
-    const equipos = Array.from(new Set((datos.equipos ?? []).filter(Boolean)));
-    const consumibles = datos.consumibles ?? [];
-    if (equipos.length === 0 && consumibles.length === 0) {
-      throw new BadRequestException('La canasta debe contener al menos un activo fijo o un material fungible.');
-    }
-
-    const prestamosCreados: Array<ReturnType<PrestamoServicio['mapPrestamoDto']>> = [];
-    const grupoCanasta = `CANASTA-${estudiante.carnet}-${Date.now()}`;
-    for (const idHerramienta of equipos) {
-      const idHerramientaLimpio = idHerramienta.trim();
-      if (!idHerramientaLimpio) continue;
-
-      const itemActivo = await this.obtenerItemActivo(idHerramientaLimpio);
-
-    await this.reemplazarEstudiantesCanasta(grupoCanasta, estudiantes);
-      await this.validarDisponibilidadItem(idHerramientaLimpio, undefined, itemActivo);
-    for (const estudianteCanasta of estudiantes) {
-      await this.sincronizarCarnetRetenidoEstudiante(estudianteCanasta.id);
-    }
-      const prestamo = this.prestamosRepo.create({
-        estudiante,
-        docente,
-        codigoHerramienta: idHerramientaLimpio,
-        grupoCanasta,
-        fechaPrestamo,
-        fechaDevolucion,
-        estado: this.estadoCalculado('activo', fechaDevolucion),
-        observaciones: datos.observaciones?.trim() || 'Canasta de prestamo',
-        itemActivo,
-      });
-
-      const guardado = await this.prestamosRepo.save(prestamo);
-      const completo = await this.prestamosRepo.findOne({ where: { id: guardado.id }, relations: ['estudiante', 'docente', 'itemActivo'] });
-      if (completo) {
-        prestamosCreados.push(this.mapPrestamoDto(completo));
-      }
-    }
-
-    const salidasConsumibles: Array<{ idLote: string; lote: string; cantidad: number; motivo: string }> = [];
-    for (const salida of consumibles) {
-      const idLote = String((salida as any).idLote ?? '').trim();
-      if (!idLote) {
-        throw new BadRequestException('Debes seleccionar un item/lote válido.');
-      }
-
-      const cantidad = Number(salida.cantidad ?? 0);
-      if (!Number.isFinite(cantidad) || cantidad <= 0) {
-        throw new BadRequestException(`Cantidad inválida para lote ${idLote}.`);
-      }
-
-      const lote = await this.lotesRepo.findOne({ where: { id: idLote }, relations: ['material'] });
-      if (!lote) {
-        throw new NotFoundException(`Lote no encontrado: ${idLote}`);
-      }
-      if (lote.cantidadDisponible < cantidad) {
-        const etiqueta = (lote as any).lote ?? (lote as any).serie ?? '';
-        throw new BadRequestException(`Stock insuficiente en lote ${etiqueta || lote.id}. Disponible: ${lote.cantidadDisponible}`);
-      }
-
-      lote.cantidadDisponible -= cantidad;
-      await this.lotesRepo.save(lote);
-
-      const mov = this.movimientosMaterialRepo.create({
-        lote,
-        tipo: 'salida',
-        cantidad,
-        motivo: salida.motivo?.trim() || 'Salida por canasta de prestamo',
-        referencia: grupoCanasta,
-      });
-      await this.movimientosMaterialRepo.save(mov);
-
-      salidasConsumibles.push({
-        idLote: lote.id,
-        lote: (lote as any).lote ?? (lote as any).serie ?? '',
-        cantidad,
-        motivo: mov.motivo,
-      });
-    }
-
-    await this.sincronizarCarnetRetenidoEstudiante(estudiante.id);
-    await this.sincronizarCarnetsRetenidosEnLote();
-
-    await this.registrarEventoInterno({
-      entidad: 'CanastaPrestamo',
-      entidadId: `${estudiante.id}-${Date.now()}`,
-      accion: 'crear',
-      detalle: {
-        estudiantes: estudiantes.map((participante) => participante.carnet),
-        docente: docente.codigo,
-        equipos: prestamosCreados.map((p) => p.idHerramienta),
-        consumibles: salidasConsumibles,
-      },
-    });
-
-    return {
-      ok: true,
-      prestamos: prestamosCreados,
-      consumibles: salidasConsumibles,
-    };
   }
 
   async editarPrestamo(
@@ -941,408 +187,815 @@ export class PrestamoServicio {
       observaciones: string;
       idDocente: number;
       estado: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite';
+      carnetRetenido: boolean;
     }>,
+    ejecutor?: any,
   ) {
-    const prestamo = await this.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
     if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
-    const snapshotAntes = this.mapPrestamoDto(prestamo);
     const idEstudianteAnterior = prestamo.estudiante.id;
 
+    const antes: Record<string, any> = {};
+    const despues: Record<string, any> = {};
+
     if (typeof datos.carnetEstudiante === 'string' && datos.carnetEstudiante.trim()) {
-      const estudiante = await this.estudiantesRepo.findOne({ where: { carnet: datos.carnetEstudiante.trim() } });
+      const estudiante = await this.util.estudiantesRepo.findOne({ where: { carnet: datos.carnetEstudiante.trim() } });
       if (!estudiante) throw new NotFoundException('Estudiante no encontrado.');
+      if (prestamo.estudiante.id !== estudiante.id) {
+        antes.carnetEstudiante = prestamo.estudiante.carnet;
+        despues.carnetEstudiante = estudiante.carnet;
+      }
       prestamo.estudiante = estudiante;
     }
 
     if (typeof datos.idHerramienta === 'string' && datos.idHerramienta.trim()) {
-      const nuevoIdHerramienta = datos.idHerramienta.trim();
-      await this.obtenerItemActivo(nuevoIdHerramienta);
-      await this.validarDisponibilidadItem(nuevoIdHerramienta, prestamo.id);
-      prestamo.codigoHerramienta = nuevoIdHerramienta;
-      prestamo.itemActivo = await this.obtenerItemActivo(nuevoIdHerramienta);
+      const nuevoIdH = datos.idHerramienta.trim();
+      await this.util.obtenerItemActivo(nuevoIdH);
+      await this.util.validarDisponibilidadItem(nuevoIdH, prestamo.id);
+      if (prestamo.codigoHerramienta !== nuevoIdH) {
+        antes.idHerramienta = prestamo.codigoHerramienta;
+        despues.idHerramienta = nuevoIdH;
+      }
+      prestamo.codigoHerramienta = nuevoIdH;
+      prestamo.itemActivo = await this.util.obtenerItemActivo(nuevoIdH);
+      prestamo.inventario = prestamo.itemActivo?.activo?.inventario ?? { id: 1 } as any;
     }
 
     if (typeof datos.idDocente === 'number') {
-      const docente = await this.docentesRepo.findOne({ where: { id: Number(datos.idDocente) } });
-      if (!docente) throw new NotFoundException('Docente no encontrado.');
-      prestamo.docente = docente;
+      const nuevoDocente = await this.util.obtenerDocenteUsuarioPorId(Number(datos.idDocente));
+      if (prestamo.docente.id !== nuevoDocente.id) {
+        antes.idDocente = prestamo.docente.id;
+        despues.idDocente = nuevoDocente.id;
+      }
+      prestamo.docente = nuevoDocente;
     }
 
     if (typeof datos.fechaPrestamo === 'string') {
-      const fechaPrestamo = new Date(datos.fechaPrestamo);
-      if (Number.isNaN(fechaPrestamo.getTime())) throw new BadRequestException('Fecha de préstamo inválida.');
-      prestamo.fechaPrestamo = fechaPrestamo;
+      const fechaP = new Date(datos.fechaPrestamo);
+      if (Number.isNaN(fechaP.getTime())) throw new BadRequestException('Fecha inválida.');
+      if (prestamo.fechaPrestamo.getTime() !== fechaP.getTime()) {
+        antes.fechaPrestamo = prestamo.fechaPrestamo.toISOString();
+        despues.fechaPrestamo = fechaP.toISOString();
+      }
+      prestamo.fechaPrestamo = fechaP;
     }
 
     if (typeof datos.fechaDevolucion === 'string' || datos.fechaDevolucion === null) {
-      const fechaDevolucion = datos.fechaDevolucion ? new Date(datos.fechaDevolucion) : null;
-      if (datos.fechaDevolucion && Number.isNaN(fechaDevolucion!.getTime())) {
-        throw new BadRequestException('Fecha de devolución inválida.');
+      const fechaD = datos.fechaDevolucion ? new Date(datos.fechaDevolucion) : null;
+      if (datos.fechaDevolucion && Number.isNaN(fechaD!.getTime())) throw new BadRequestException('Fecha inválida.');
+      const valAnt = prestamo.fechaDevolucion ? prestamo.fechaDevolucion.getTime() : null;
+      const valNue = fechaD ? fechaD.getTime() : null;
+      if (valAnt !== valNue) {
+        antes.fechaDevolucion = prestamo.fechaDevolucion ? prestamo.fechaDevolucion.toISOString() : null;
+        despues.fechaDevolucion = fechaD ? fechaD.toISOString() : null;
       }
-      prestamo.fechaDevolucion = fechaDevolucion;
+      prestamo.fechaDevolucion = fechaD;
     }
 
     if (typeof datos.observaciones === 'string') {
-      prestamo.observaciones = datos.observaciones.trim();
+      const obs = datos.observaciones.trim();
+      if ((prestamo.observaciones ?? '') !== obs) {
+        antes.observaciones = prestamo.observaciones ?? '';
+        despues.observaciones = obs;
+      }
+      prestamo.observaciones = obs;
+    }
+
+    if (typeof datos.carnetRetenido === 'boolean') {
+      if (prestamo.carnetRetenido !== datos.carnetRetenido) {
+        antes.carnetRetenido = prestamo.carnetRetenido;
+        despues.carnetRetenido = datos.carnetRetenido;
+      }
+      prestamo.carnetRetenido = datos.carnetRetenido;
     }
 
     if (prestamo.fechaDevolucion && prestamo.fechaDevolucion.getTime() <= prestamo.fechaPrestamo.getTime()) {
-      throw new BadRequestException('La fecha de devolución debe ser posterior a la fecha de préstamo.');
+      throw new BadRequestException('Fecha de devolución debe ser posterior.');
     }
 
-    prestamo.estado = this.estadoCalculado(datos.estado ?? prestamo.estado, prestamo.fechaDevolucion);
+    const estadoAnterior = prestamo.estado;
+    let estadoFinal = this.util.estadoCalculado(datos.estado ?? prestamo.estado, prestamo.fechaDevolucion);
     if (datos.estado === 'devuelto') {
-      prestamo.estado = this.estadoDevolucionFinal(prestamo.fechaDevolucion);
+      estadoFinal = this.util.estadoDevolucionFinal(prestamo.fechaDevolucion);
+    }
+    if (estadoAnterior !== estadoFinal) {
+      antes.estado = estadoAnterior;
+      despues.estado = estadoFinal;
+    }
+    prestamo.estado = estadoFinal;
+
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+    if (guardado.itemActivo && (guardado.estado === 'devuelto' || guardado.estado === 'devuelto_fuera_de_fecha_limite')) {
+      await this.util.marcarItemDisponibleAlDevolver(guardado.itemActivo);
     }
 
-    const guardado = await this.prestamosRepo.save(prestamo);
+    await this.util.sincronizarCarnetRetenidoEstudiante(idEstudianteAnterior);
+    await this.util.sincronizarCarnetRetenidoEstudiante(guardado.estudiante.id);
+    await this.util.sincronizarCarnetsRetenidosEnLote();
 
-    if (guardado.itemActivo) {
-      if (guardado.estado === 'devuelto' || guardado.estado === 'devuelto_fuera_de_fecha_limite') {
-        await this.marcarItemDisponibleAlDevolver(guardado.itemActivo);
-      }
+    if (Object.keys(despues).length > 0) {
+      const accion = antes.estado !== despues.estado && (despues.estado === 'devuelto' || despues.estado === 'devuelto_fuera_de_fecha_limite')
+        ? 'devolucion'
+        : (antes.estado !== despues.estado ? 'modificacion_estado' : 'modificacion_detalles');
+      await this.util.registrarCambioHistorial(guardado, accion, guardado.estado, 'Préstamo editado.', ejecutor, { antes, despues });
     }
 
-    await this.sincronizarCarnetRetenidoEstudiante(idEstudianteAnterior);
-    await this.sincronizarCarnetRetenidoEstudiante(guardado.estudiante.id);
-    await this.sincronizarCarnetsRetenidosEnLote();
-    await this.registrarEventoInterno({
-      entidad: 'Prestamo',
-      entidadId: guardado.id,
-      accion: 'actualizar',
-      detalle: {
-        antes: snapshotAntes,
-        despues: this.mapPrestamoDto(guardado),
-      },
-    });
     return this.mapPrestamoDto(guardado);
   }
 
-  async extenderFechaDevolucion(id: number, nuevaFechaDevolucion: string) {
-    const prestamo = await this.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+  async extenderFechaDevolucion(id: number, nuevaFechaDevolucion: string, ejecutor?: any) {
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
     if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
 
     const nuevaFecha = new Date(nuevaFechaDevolucion);
-    if (Number.isNaN(nuevaFecha.getTime())) throw new BadRequestException('Nueva fecha de devolución inválida.');
-    if (nuevaFecha.getTime() <= prestamo.fechaPrestamo.getTime()) {
-      throw new BadRequestException('La nueva fecha de devolución debe ser posterior a la fecha de préstamo.');
-    }
+    if (Number.isNaN(nuevaFecha.getTime())) throw new BadRequestException('Nueva fecha inválida.');
+    if (nuevaFecha.getTime() <= prestamo.fechaPrestamo.getTime()) throw new BadRequestException('Fecha debe ser posterior.');
 
+    const estadoAnterior = prestamo.estado;
+    const fechaAnterior = prestamo.fechaDevolucion;
     prestamo.fechaDevolucion = nuevaFecha;
-    prestamo.estado = this.estadoCalculado('activo', nuevaFecha);
-    const guardado = await this.prestamosRepo.save(prestamo);
-    await this.sincronizarCarnetRetenidoEstudiante(guardado.estudiante.id);
-    await this.sincronizarCarnetsRetenidosEnLote();
-    await this.registrarEventoInterno({
-      entidad: 'Prestamo',
-      entidadId: guardado.id,
-      accion: 'actualizar',
-      detalle: {
-        cambio: 'extender_fecha_devolucion',
-        despues: this.mapPrestamoDto(guardado),
-      },
+    prestamo.estado = this.util.estadoCalculado('activo', nuevaFecha);
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+
+    await this.util.sincronizarCarnetRetenidoEstudiante(guardado.estudiante.id);
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+
+    await this.util.registrarCambioHistorial(guardado, 'extension', guardado.estado, `Fecha extendida a ${nuevaFecha.toISOString().slice(0, 10)}.`, ejecutor, {
+      antes: { fechaDevolucion: fechaAnterior ? fechaAnterior.toISOString() : null, estado: estadoAnterior },
+      despues: { fechaDevolucion: guardado.fechaDevolucion ? guardado.fechaDevolucion.toISOString() : null, estado: guardado.estado }
     });
+
     return this.mapPrestamoDto(guardado);
   }
 
-  async marcarDevuelto(id: number) {
-    const prestamo = await this.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+  async marcarDevuelto(id: number, ejecutor?: any) {
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
     if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
 
-    prestamo.estado = this.estadoDevolucionFinal(prestamo.fechaDevolucion);
-    const guardado = await this.prestamosRepo.save(prestamo);
+    const estadoAnterior = prestamo.estado;
+    prestamo.estado = this.util.estadoDevolucionFinal(prestamo.fechaDevolucion);
+    prestamo.fechaDevolucion = new Date(); // Update return date to actual return time!
+    const guardado = await this.util.prestamosRepo.save(prestamo);
 
     if (guardado.itemActivo) {
-      await this.marcarItemDisponibleAlDevolver(guardado.itemActivo);
-    } else {
+      await this.util.marcarItemDisponibleAlDevolver(guardado.itemActivo);
+    } else if (guardado.codigoHerramienta) {
       try {
-        const item = await this.obtenerItemActivo(guardado.codigoHerramienta);
-        await this.marcarItemDisponibleAlDevolver(item);
-      } catch {
-        // Si no se puede resolver (datos legacy), no bloquea la devolución.
-      }
+        const item = await this.util.obtenerItemActivo(guardado.codigoHerramienta);
+        await this.util.marcarItemDisponibleAlDevolver(item);
+      } catch {}
     }
 
-    await this.sincronizarCarnetRetenidoEstudiante(guardado.estudiante.id);
-    await this.sincronizarCarnetsRetenidosEnLote();
-    await this.registrarEventoInterno({
-      entidad: 'Prestamo',
-      entidadId: guardado.id,
-      accion: 'actualizar',
-      detalle: {
-        cambio: 'marcar_devuelto',
-        despues: this.mapPrestamoDto(guardado),
-      },
+    await this.util.sincronizarCarnetRetenidoEstudiante(guardado.estudiante.id);
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+
+    await this.util.registrarCambioHistorial(guardado, 'devolucion', guardado.estado, 'Préstamo devuelto.', ejecutor, {
+      antes: { estado: estadoAnterior },
+      despues: { estado: guardado.estado }
     });
+
     return this.mapPrestamoDto(guardado);
   }
 
-  async crearEstudiante(datos: {
-    carnet: string;
-    nombre: string;
-    apellido: string;
-    carrera: string;
-    semestre: number;
-    carnetRetenido?: boolean;
-    carnetRetenidoOverride?: boolean | null;
-  }): Promise<EstudianteEntidad> {
-    const carnet = datos.carnet.trim();
-    const existente = await this.estudiantesRepo.findOne({ where: { carnet } });
-    if (existente) {
-      throw new BadRequestException('El carnet ya está registrado.');
+  async devolverPrestamoCompleto(
+    id: number,
+    datos: { estadoFisicoDevolucion?: string; carnetDevuelto?: boolean; observaciones?: string },
+    ejecutor?: any,
+  ) {
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
+
+    const estadoAnterior = prestamo.estado;
+    prestamo.estado = this.util.estadoDevolucionFinal(prestamo.fechaDevolucion);
+    prestamo.estadoFisicoDevolucion = datos.estadoFisicoDevolucion || 'bueno';
+
+    if (datos.observaciones?.trim()) {
+      prestamo.observaciones = `${prestamo.observaciones || ''}\nDevolución: ${datos.observaciones.trim()}`.trim();
     }
 
-    const carreraRef = await this.upsertCarreraPorNombre(datos.carrera);
+    const carnetDevuelto = typeof datos.carnetDevuelto === 'boolean' ? datos.carnetDevuelto : true;
+    if (carnetDevuelto) prestamo.carnetRetenido = false;
 
-    // Compatibilidad: si llega carnetRetenido (boolean), lo tratamos como override manual.
-    const overrideExplicito =
-      typeof datos.carnetRetenidoOverride === 'boolean' || datos.carnetRetenidoOverride === null
-        ? datos.carnetRetenidoOverride
-        : undefined;
-    const override =
-      typeof overrideExplicito !== 'undefined'
-        ? overrideExplicito
-        : typeof datos.carnetRetenido === 'boolean'
-          ? datos.carnetRetenido
-          : null;
+    prestamo.fechaDevolucion = new Date(); // Update return date to actual return time!
 
-    const estudiante = this.estudiantesRepo.create({
-      carnet,
-      nombre: datos.nombre.trim(),
-      apellido: datos.apellido.trim(),
-      carrera: carreraRef.nombre,
-      carreraRef,
-      semestre: Number(datos.semestre),
-      carnetRetenidoOverride: override,
-      carnetRetenido: typeof override === 'boolean' ? override : false,
-    });
-    let creado = await this.estudiantesRepo.save(estudiante);
-
-    // Si está en automático, recalculamos según préstamos activos.
-    if (creado.carnetRetenidoOverride === null) {
-      await this.sincronizarCarnetRetenidoEstudiante(creado.id);
-      creado = (await this.estudiantesRepo.findOne({ where: { id: creado.id } })) ?? creado;
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+    if (guardado.itemActivo) {
+      await this.util.marcarItemDisponibleAlDevolver(guardado.itemActivo);
+      guardado.itemActivo.estado_fisico = prestamo.estadoFisicoDevolucion || 'bueno';
+      await this.util.itemsActivosRepo.save(guardado.itemActivo);
     }
 
-    await this.registrarEventoInterno({
-      entidad: 'Estudiante',
-      entidadId: creado.id,
-      accion: 'crear',
-      detalle: creado as unknown as Record<string, unknown>,
+    if (carnetDevuelto) {
+      guardado.estudiante.carnetRetenido = false;
+      await this.util.estudiantesRepo.save(guardado.estudiante);
+    }
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+
+    await this.util.registrarCambioHistorial(guardado, 'devolucion', guardado.estado, 'Préstamo devuelto.', ejecutor, {
+      antes: { estado: estadoAnterior },
+      despues: { estado: guardado.estado, estadoFisicoDevolucion: guardado.estadoFisicoDevolucion }
     });
-    return creado;
+
+    return this.mapPrestamoDto(guardado);
   }
 
-  async editarEstudiante(
-    id: number,
-    datos: Partial<{
-      carnet: string;
-      nombre: string;
-      apellido: string;
-      carrera: string;
-      semestre: number;
-      carnetRetenido: boolean;
-      carnetRetenidoOverride: boolean | null;
-    }>,
-  ): Promise<EstudianteEntidad> {
-    const estudiante = await this.estudiantesRepo.findOne({ where: { id } });
-    if (!estudiante) {
-      throw new NotFoundException('Estudiante no encontrado.');
-    }
-    const snapshotAntes = { ...estudiante };
+  async eliminarPrestamo(id: number, ejecutor?: any): Promise<void> {
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
 
-    if (datos.carnet && datos.carnet.trim() !== estudiante.carnet) {
-      const existente = await this.estudiantesRepo.findOne({ where: { carnet: datos.carnet.trim() } });
-      if (existente) {
-        throw new BadRequestException('El carnet ya está registrado.');
+    await this.util.registrarCambioHistorial(prestamo, 'eliminacion', prestamo.estado, 'Préstamo eliminado (soft delete).', ejecutor, {
+      antes: { deletedAt: null },
+      despues: { deletedAt: new Date().toISOString() }
+    });
+
+    await this.util.prestamosRepo.softRemove(prestamo);
+    await this.util.sincronizarCarnetRetenidoEstudiante(prestamo.estudiante.id);
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+  }
+
+  async aceptarPrestamo(id: number, ejecutor?: any) {
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
+    if (prestamo.estado !== 'solicitado') throw new BadRequestException('El préstamo no está solicitado.');
+
+    const estadoAnterior = prestamo.estado;
+    prestamo.estado = 'aceptado';
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+
+    await this.util.registrarCambioHistorial(guardado, 'aceptacion', guardado.estado, 'Solicitud aceptada.', ejecutor, {
+      antes: { estado: estadoAnterior },
+      despues: { estado: guardado.estado }
+    });
+
+    return this.mapPrestamoDto(guardado);
+  }
+
+  async rechazarPrestamo(id: number, motivo: string, ejecutor?: any) {
+    const limpioMotivo = String(motivo ?? '').trim();
+    if (!limpioMotivo) throw new BadRequestException('Debes proporcionar un motivo.');
+
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
+    if (prestamo.estado !== 'solicitado') throw new BadRequestException('El préstamo no está solicitado.');
+
+    const estadoAnterior = prestamo.estado;
+    prestamo.estado = 'rechazado';
+    prestamo.motivoRechazo = limpioMotivo;
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+
+    await this.util.registrarCambioHistorial(guardado, 'rechazo', guardado.estado, `Solicitud rechazada. Motivo: ${limpioMotivo}`, ejecutor, {
+      antes: { estado: estadoAnterior, motivoRechazo: null },
+      despues: { estado: guardado.estado, motivoRechazo: limpioMotivo }
+    });
+
+    return this.mapPrestamoDto(guardado);
+  }
+
+  async despacharPrestamo(id: number, datos: { estadoFisicoEntrega?: string; carnetRetenido?: boolean }, ejecutor?: any) {
+    const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
+    if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
+
+    const est = prestamo.estudiante;
+    const checkEstados = ['despachado', 'vencido'];
+    const activosCount = await this.util.prestamosRepo
+      .createQueryBuilder('p')
+      .where('p.id_estudiante = :idEstudiante', { idEstudiante: est.id })
+      .andWhere('p.estado IN (:...estados)', { estados: checkEstados })
+      .andWhere('p.carnet_retenido = true')
+      .andWhere('p.deleted_at IS NULL')
+      .andWhere('p.id <> :id', { id: prestamo.id })
+      .getCount();
+
+    const activosCanastaCount = await this.util.canastaEstudiantesRepo
+      .createQueryBuilder('ce')
+      .innerJoin(PrestamoEntidad, 'p', 'p.grupo_canasta = ce.grupoCanasta AND p.estado IN (:...estados) AND p.deleted_at IS NULL', { estados: checkEstados })
+      .where('ce.id_estudiante = :idEstudiante', { idEstudiante: est.id })
+      .andWhere('ce.carnet_retenido = true')
+      .getCount();
+
+    if (activosCount > 0 || activosCanastaCount > 0 || est.carnetRetenidoOverride === true) {
+      throw new BadRequestException(`El estudiante ${est.nombre} (${est.carnet}) ya tiene su carnet retenido.`);
+    }
+
+    const estadoAnterior = prestamo.estado;
+    prestamo.estado = 'despachado';
+    prestamo.fechaPrestamo = new Date(); // Update start date/time
+    prestamo.estadoFisicoEntrega = datos.estadoFisicoEntrega || 'bueno';
+
+    const retenido = typeof datos.carnetRetenido === 'boolean' ? datos.carnetRetenido : true;
+    prestamo.carnetRetenido = retenido;
+
+    if (prestamo.itemActivo) await this.util.marcarItemEnPrestamo(prestamo.itemActivo);
+
+    const guardado = await this.util.prestamosRepo.save(prestamo);
+    est.carnetRetenido = retenido;
+    await this.util.estudiantesRepo.save(est);
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+
+    await this.util.registrarCambioHistorial(guardado, 'despacho', guardado.estado, 'Préstamo despachado.', ejecutor, {
+      antes: { estado: estadoAnterior },
+      despues: { estado: guardado.estado, estadoFisicoEntrega: guardado.estadoFisicoEntrega }
+    });
+
+    return this.mapPrestamoDto(guardado);
+  }
+
+  async obtenerHistorialPrestamo(id: number, ejecutor: any) {
+    if (ejecutor?.rol !== 'administrador') throw new ForbiddenException('No tienes permiso.');
+    const prestamo = await this.util.prestamosRepo.findOne({
+      where: { id },
+      relations: ['itemActivo', 'itemActivo.activo'],
+      withDeleted: true,
+    });
+    if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
+
+    const grupoCanasta = prestamo.grupoCanasta;
+    let prestamosEnCanasta: PrestamoEntidad[] = [];
+    if (grupoCanasta) {
+      prestamosEnCanasta = await this.util.prestamosRepo.find({
+        where: { grupoCanasta },
+        relations: ['itemActivo', 'itemActivo.activo'],
+        withDeleted: true,
+      });
+    } else {
+      prestamosEnCanasta = [prestamo];
+    }
+
+    const idsPrestamos = prestamosEnCanasta.map((p) => p.id);
+    const todosLosLogs = await this.util.historialRepo.find({
+      where: {
+        prestamo: {
+          id: In(idsPrestamos),
+        },
+      },
+      relations: ['prestamo'],
+      withDeleted: true,
+      order: {
+        fecha: 'ASC',
+      },
+    });
+
+    let logs = todosLosLogs.filter((l) => l.prestamo.id === id);
+
+    if (logs.length === 0) {
+      const fallbackLogs: HistorialPrestamoEntidad[] = [];
+      const fechaCreacion = prestamo.createdAt ?? prestamo.fechaPrestamo;
+      fallbackLogs.push(this.util.historialRepo.create({
+        id: -1,
+        fecha: fechaCreacion,
+        nombreUsuario: 'Sistema',
+        rolUsuario: 'sistema',
+        correoUsuario: 'sistema@sgi.local',
+        estado: prestamo.fechaDevolucion ? 'pendiente' : 'activo',
+        accion: 'creacion_solicitud',
+        observaciones: 'Registro inicial de préstamo.',
+        detalles: null,
+        prestamo,
+      }));
+
+      if (prestamo.estado === 'devuelto' || prestamo.estado === 'devuelto_fuera_de_fecha_limite') {
+        fallbackLogs.push(this.util.historialRepo.create({
+          id: -2,
+          fecha: prestamo.fechaDevolucion ?? new Date(),
+          nombreUsuario: 'Sistema',
+          rolUsuario: 'sistema',
+          correoUsuario: 'sistema@sgi.local',
+          estado: prestamo.estado,
+          accion: 'devolucion',
+          observaciones: 'Item devuelto.',
+          detalles: null,
+          prestamo,
+        }));
       }
-      estudiante.carnet = datos.carnet.trim();
+      logs = fallbackLogs;
     }
 
-    if (typeof datos.nombre === 'string') estudiante.nombre = datos.nombre.trim();
-    if (typeof datos.apellido === 'string') estudiante.apellido = datos.apellido.trim();
-    if (typeof datos.carrera === 'string') {
-      const carreraRef = await this.upsertCarreraPorNombre(datos.carrera);
-      estudiante.carrera = carreraRef.nombre;
-      estudiante.carreraRef = carreraRef;
+    const logsEnriquecidos = logs.map((log) => {
+      const estadoActivosCanasta = prestamosEnCanasta.map((p) => {
+        const logsDelPrestamo = todosLosLogs.filter(
+          (l) => l.prestamo.id === p.id && new Date(l.fecha).getTime() <= new Date(log.fecha).getTime(),
+        );
+        const ultimoLog = logsDelPrestamo[logsDelPrestamo.length - 1];
+        const estadoEnEtapa = ultimoLog ? ultimoLog.estado : p.estado;
+
+        let estadoFinal = estadoEnEtapa;
+        const requestEstado = log.estado;
+
+        if (requestEstado === 'solicitado') {
+          estadoFinal = 'solicitado';
+        } else if (requestEstado === 'aceptado') {
+          estadoFinal = 'aceptado';
+        } else if (['despachado', 'activo', 'pendiente', 'vencido'].includes(requestEstado)) {
+          estadoFinal = estadoEnEtapa === 'no_despachado' ? 'disponible' : 'despachado';
+        } else if (['devuelto', 'devuelto_fuera_de_fecha_limite'].includes(requestEstado)) {
+          estadoFinal = estadoEnEtapa === 'no_despachado' ? 'disponible' : estadoEnEtapa;
+        } else if (requestEstado === 'rechazado') {
+          estadoFinal = 'rechazado';
+        }
+
+        return {
+          idHerramienta: p.codigoHerramienta || '',
+          nombre: p.itemActivo?.activo?.nombre ?? 'Activo',
+          codigo: p.itemActivo?.codigo_inventario ?? p.codigoHerramienta ?? 'Sin código',
+          estado: estadoFinal,
+        };
+      });
+
+      return {
+        ...log,
+        estadoActivosCanasta,
+      };
+    });
+
+    return logsEnriquecidos;
+  }
+
+  private parsearIdsPositivos(items: any[]): number[] {
+    if (!Array.isArray(items)) return [];
+    return Array.from(new Set(items.map((i) => Number(i)).filter((i) => Number.isInteger(i) && i > 0)));
+  }
+
+  private construirResumenAsignaciones(e: EstudianteEntidad) {
+    const asignaciones = (e.asignacionesCarrera ?? [])
+      .filter((a) => a?.carrera && a.cu)
+      .map((a) => ({
+        carreraId: a.carrera?.id ?? null,
+        carrera: a.carrera?.nombre ?? '',
+        cu: String(a.cu).trim().toUpperCase(),
+        prefijoCu: a.carrera?.prefijoCu ?? null,
+      }));
+    if (asignaciones.length > 0) return asignaciones;
+    return [{
+      carreraId: e.carreraRef?.id ?? null,
+      carrera: e.carrera ?? '',
+      cu: String(e.cu ?? '').trim().toUpperCase(),
+      prefijoCu: e.carreraRef?.prefijoCu ?? null,
+    }];
+  }
+
+  private resolverSubgrupoCoincidente(subgrupos: SubgrupoPrestamoDocenciaEntidad[], participantesIds: number[]) {
+    const firma = Array.from(new Set(participantesIds.map((id) => Number(id)).filter((id) => id > 0))).sort((a, b) => a - b).join(',');
+    return subgrupos.find((s) => Array.from(new Set((s.estudianteIds ?? []).map((id) => Number(id)))).sort((a, b) => a - b).join(',') === firma) ?? null;
+  }
+
+  private construirGruposPrestamoMateria(
+    subgrupos: SubgrupoPrestamoDocenciaEntidad[],
+    estudianteId: number,
+    estudiantesMap: Map<number, EstudianteEntidad>,
+  ) {
+    return subgrupos
+      .filter((s) => (s.estudianteIds ?? []).includes(estudianteId))
+      .map((s) => {
+        const integrantes = (s.estudianteIds ?? []).map((id) => {
+          const est = estudiantesMap.get(id);
+          return est ? {
+            id: est.id,
+            nombre: est.nombre,
+            apellido: est.apellido,
+            carnet: est.carnet,
+            carrera: est.carrera,
+            esResponsable: s.responsableEstudianteId === est.id,
+          } : null;
+        }).filter(Boolean);
+
+        return {
+          id: s.id,
+          codigo: s.codigo,
+          nombre: s.nombre ?? null,
+          descripcion: s.descripcion ?? null,
+          cantidadIntegrantes: Array.isArray(s.estudianteIds) ? s.estudianteIds.length : 0,
+          esResponsable: s.responsableEstudianteId === estudianteId,
+          estudianteIds: s.estudianteIds ?? [],
+          integrantes,
+        };
+      });
+  }
+
+  async obtenerDashboardEstudiante(usuarioId: number) {
+    const estudiante = await this.util.estudiantesRepo.findOne({
+      where: { usuario: { id: usuarioId } },
+      relations: ['carreraRef', 'usuario', 'cus', 'cus.carreras'],
+    });
+    if (!estudiante) throw new NotFoundException('Estudiante no encontrado.');
+
+    const participacionesCanasta = await this.util.canastaEstudiantesRepo.find({ where: { estudiante: { id: estudiante.id } } });
+    const gruposCanasta = Array.from(new Set(participacionesCanasta.map((p) => p.grupoCanasta?.trim()).filter(Boolean)));
+    const condiciones = [{ estudiante: { id: estudiante.id } }, ...gruposCanasta.map((grupoCanasta) => ({ grupoCanasta }))];
+    const prestamos = await this.util.prestamosRepo.find({
+      where: condiciones as any,
+      relations: ['estudiante', 'docente', 'itemActivo', 'itemActivo.activo'],
+      order: { fechaPrestamo: 'DESC', id: 'DESC' },
+    });
+
+    const gruposInscritos = await this.gruposMateriaDocenciaRepo
+      .createQueryBuilder('gr')
+      .leftJoinAndSelect('gr.docenteUsuario', 'du')
+      .where("gr.estudianteIds @> :id::jsonb", { id: `[${estudiante.id}]` })
+      .getMany();
+
+    const asignacionesCarrera = this.construirResumenAsignaciones(estudiante);
+    const codigosMateria = Array.from(new Set(gruposInscritos.map((g) => this.util.normalizarCodigoMateriaCatalogo(g.codigoMateria || g.sigla || g.materia || '')).filter(Boolean)));
+    const idsMateria = Array.from(new Set(gruposInscritos.map((g) => g.materiaId).filter(Boolean))) as number[];
+
+    let materiasCatalogo: MateriaEntidad[] = [];
+    if (codigosMateria.length > 0 || idsMateria.length > 0) {
+      const query = this.materiasRepo.createQueryBuilder('m');
+      const conditions: string[] = [];
+      const params: Record<string, any> = {};
+
+      if (codigosMateria.length > 0) {
+        conditions.push('UPPER(m.codigo) IN (:...codigos)');
+        params.codigos = codigosMateria;
+      }
+      if (idsMateria.length > 0) {
+        conditions.push('m.id IN (:...ids)');
+        params.ids = idsMateria;
+      }
+
+      materiasCatalogo = await query.where(conditions.join(' OR '), params).getMany();
     }
-    if (typeof datos.semestre === 'number') estudiante.semestre = Number(datos.semestre);
+
+    const materiasCatalogoPorCodigo = new Map(materiasCatalogo.map((m) => [this.util.normalizarCodigoMateriaCatalogo(m.codigo), m]));
+    const materiasCatalogoPorId = new Map(materiasCatalogo.map((m) => [m.id, m]));
+
+    const user = { id: usuarioId, rol: 'estudiante' };
+    const canastas = await this.prestamoCanastaServicio.obtenerCanastasPrestamo(user);
+
+    const docenteUserIds = Array.from(new Set(gruposInscritos.map((g) => g.docenteUsuario?.id).filter(Boolean)));
+    const canastasDocenteIds = Array.from(new Set(canastas.map((c) => c.idDocente).filter(Boolean))) as number[];
+
+    const queryDocentes: any[] = [];
+    if (docenteUserIds.length > 0) {
+      queryDocentes.push(...docenteUserIds.map((id) => ({ usuario: { id } })));
+    }
+    if (canastasDocenteIds.length > 0) {
+      queryDocentes.push(...canastasDocenteIds.map((id) => ({ id })));
+    }
+
+    const docentesInfo = queryDocentes.length > 0
+      ? await this.util.docentesRepo.find({
+          where: queryDocentes,
+          relations: ['usuario'],
+        })
+      : [];
+    const docentePorUsuarioId = new Map(docentesInfo.filter((d) => d.usuario?.id).map((d) => [d.usuario!.id, d]));
+    const usuarioIdPorDocenteId = new Map(docentesInfo.filter((d) => d.usuario?.id).map((d) => [d.id, d.usuario!.id]));
+
+    const subgruposPrestamo = codigosMateria.length > 0 && gruposInscritos.length > 0
+      ? await this.subgruposPrestamoRepo.find({
+          where: gruposInscritos.map((g) => ({ grupoMateria: { id: g.id }, habilitado: true })),
+          relations: ['grupoMateria', 'grupoMateria.docenteUsuario'],
+        })
+      : [];
+
+    const todosEstudianteIdsSubgrupos = new Set<number>();
+    for (const s of subgruposPrestamo) {
+      if (Array.isArray(s.estudianteIds)) {
+        for (const id of s.estudianteIds) {
+          if (typeof id === 'number') todosEstudianteIdsSubgrupos.add(id);
+        }
+      }
+      if (s.responsableEstudianteId) {
+        todosEstudianteIdsSubgrupos.add(s.responsableEstudianteId);
+      }
+    }
+
+    const estudiantesSubgrupos = todosEstudianteIdsSubgrupos.size > 0
+      ? await this.util.estudiantesRepo.createQueryBuilder('e')
+          .where('e.id IN (:...ids)', { ids: Array.from(todosEstudianteIdsSubgrupos) })
+          .getMany()
+      : [];
+    const estudiantesSubgruposMap = new Map(estudiantesSubgrupos.map((e) => [e.id, e]));
+
+    const subgruposPorGrupo = new Map<string, SubgrupoPrestamoDocenciaEntidad[]>();
+    for (const s of subgruposPrestamo) {
+      if (!s.grupoMateria?.id) continue;
+      const lista = subgruposPorGrupo.get(s.grupoMateria.id) ?? [];
+      lista.push(s);
+      subgruposPorGrupo.set(s.grupoMateria.id, lista);
+    }
+
+    const limpiarNombreMateria = (n: string | null | undefined): string | null => {
+      if (!n) return null;
+      const limpio = n.trim();
+      if (limpio.toLowerCase() === 'sin nombre' || limpio === '') return null;
+      return limpio;
+    };
+
+    const materiasInscritas = gruposInscritos.map((g) => {
+      const mc = (g.materiaId ? materiasCatalogoPorId.get(g.materiaId) : null)
+        || materiasCatalogoPorCodigo.get(this.util.normalizarCodigoMateriaCatalogo(g.codigoMateria || g.sigla || g.materia || ''));
+      const d = g.docenteUsuario ? docentePorUsuarioId.get(g.docenteUsuario.id) : null;
+      
+      const asignacionesDelGrupo = g.carrerasPorEstudiante?.[estudiante.id]
+        ? asignacionesCarrera.filter(a => g.carrerasPorEstudiante![estudiante.id].includes(a.carrera))
+        : asignacionesCarrera;
+
+      return {
+        grupoId: g.id,
+        materiaCodigo: g.codigoMateria || g.sigla || g.materia || mc?.codigo || null,
+        materiaNombre: limpiarNombreMateria(g.nombreMateria) || limpiarNombreMateria(g.nombre) || mc?.nombre || g.materia || null,
+        docente: d ? `${d.nombre ?? ''} ${d.apellido ?? ''}`.trim() : (g.docenteUsuario ? g.docenteUsuario.correo : null),
+        grupo: g.grupo,
+        maxEstudiantesGrupo: g.maxEstudiantesGrupo ?? 3,
+        carreras: asignacionesDelGrupo.map((a) => ({
+          carreraId: a.carreraId,
+          carrera: a.carrera,
+          cu: a.cu,
+          prefijoCu: a.prefijoCu,
+        })),
+        gruposPrestamo: this.construirGruposPrestamoMateria(subgruposPorGrupo.get(g.id) ?? [], estudiante.id, estudiantesSubgruposMap),
+      };
+    });
+
+    const materiasPorCarreraMap = new Map<string, any>();
+    for (const m of materiasInscritas) {
+      const carrerasM = m.carreras.length > 0 ? m.carreras : asignacionesCarrera;
+      for (const c of carrerasM) {
+        const clave = `${c.carreraId ?? 'sin-id'}:${c.carrera}`;
+        const actual = materiasPorCarreraMap.get(clave) ?? { carreraId: c.carreraId, carrera: c.carrera, cu: c.cu, prefijoCu: c.prefijoCu, materias: [] };
+        actual.materias.push(m);
+        materiasPorCarreraMap.set(clave, actual);
+      }
+    }
+
+    const prestamosResumen = canastas.map((c) => {
+      const esGrupal = !!c.grupoCanasta;
+      let materiaGrupoId = null;
+      let materiaCodigo = null;
+      let materiaNombre = null;
+      let grupoPrestamoId = null;
+      let grupoPrestamoCodigo = null;
+      let grupoPrestamoNombre = null;
+      let esLider = false;
+
+      const docenteUsuarioId = c.idDocente ? usuarioIdPorDocenteId.get(c.idDocente) : null;
+
+      // Find subgrupo match
+      const matchSg = subgruposPrestamo.find(sg => 
+        sg.grupoMateria?.docenteUsuario?.id === docenteUsuarioId && 
+        sg.estudianteIds?.includes(estudiante.id)
+      );
+
+      if (matchSg) {
+        materiaGrupoId = matchSg.grupoMateria.id;
+        const mc = (matchSg.grupoMateria.materiaId ? materiasCatalogoPorId.get(matchSg.grupoMateria.materiaId) : null)
+          || materiasCatalogoPorCodigo.get(this.util.normalizarCodigoMateriaCatalogo(matchSg.grupoMateria.codigoMateria || matchSg.grupoMateria.sigla || matchSg.grupoMateria.materia || ''));
+        materiaCodigo = matchSg.grupoMateria.codigoMateria || matchSg.grupoMateria.sigla || matchSg.grupoMateria.materia || mc?.codigo || null;
+        materiaNombre = limpiarNombreMateria(matchSg.grupoMateria.nombreMateria) || limpiarNombreMateria(matchSg.grupoMateria.nombre) || mc?.nombre || matchSg.grupoMateria.materia || null;
+        grupoPrestamoId = matchSg.id;
+        grupoPrestamoCodigo = matchSg.codigo;
+        grupoPrestamoNombre = matchSg.nombre || matchSg.codigo;
+        esLider = matchSg.responsableEstudianteId === estudiante.id;
+      } else {
+        // Fallback: match by subject group docente
+        const matchG = gruposInscritos.find(g => g.docenteUsuario?.id === docenteUsuarioId);
+        if (matchG) {
+          materiaGrupoId = matchG.id;
+          const mc = (matchG.materiaId ? materiasCatalogoPorId.get(matchG.materiaId) : null)
+            || materiasCatalogoPorCodigo.get(this.util.normalizarCodigoMateriaCatalogo(matchG.codigoMateria || matchG.sigla || matchG.materia || ''));
+          materiaCodigo = matchG.codigoMateria || matchG.sigla || matchG.materia || mc?.codigo || null;
+          materiaNombre = limpiarNombreMateria(matchG.nombreMateria) || limpiarNombreMateria(matchG.nombre) || mc?.nombre || matchG.materia || null;
+        }
+      }
+
+      return {
+        ...c,
+        esPrestamoGrupal: esGrupal,
+        esLiderGrupo: esLider,
+        puedeDescargarPdf: esGrupal,
+        grupoPrestamoId,
+        grupoPrestamoCodigo,
+        grupoPrestamoNombre,
+        materiaGrupoId,
+        materiaCodigo,
+        materiaNombre,
+        pdfUrl: null,
+      };
+    });
+
+    const dashboardPrestamos = prestamos.map((p) => this.mapPrestamoDto(p));
+
+    return {
+      perfil: {
+        id: estudiante.id,
+        carnet: estudiante.carnet,
+        cu: asignacionesCarrera[0]?.cu ?? estudiante.cu,
+        cus: asignacionesCarrera.map((a) => a.cu),
+        nombre: estudiante.nombre,
+        apellido: estudiante.apellido,
+        carrera: asignacionesCarrera[0]?.carrera ?? estudiante.carrera,
+        carreras: asignacionesCarrera.map((a) => a.carrera),
+        asignacionesCarrera,
+        carnetRetenido: estudiante.carnetRetenido,
+        cusRetenidos: estudiante.carnetRetenido ? Array.from(new Set(asignacionesCarrera.map((a) => a.cu).filter(Boolean))) : [],
+      },
+      materias: materiasInscritas,
+      materiasPorCarrera: Array.from(materiasPorCarreraMap.values()),
+      prestamos: dashboardPrestamos,
+      prestamosResumen,
+    };
+  }
+  async obtenerEstudiantes(): Promise<EstudianteEntidad[]> {
+    await this.util.marcarVencidosEnLote();
+    await this.util.sincronizarCarnetsRetenidosEnLote();
+    return this.util.estudiantesRepo.find({
+      order: { apellido: 'ASC', name: 'ASC' } as any,
+      relations: ['carreraRef', 'cus', 'cus.carreras'],
+    });
+  }
+
+  async obtenerDocentes(): Promise<any[]> {
+    const docentes = await this.util.docentesRepo.find({
+      relations: ['usuario'],
+      order: { codigo: 'ASC' },
+    });
+    return docentes.map((d) => ({
+      id: d.id,
+      correo: d.usuario?.correo ?? '',
+      codigo: d.codigo ?? '',
+      nombre: d.nombre ?? '',
+      apellido: d.apellido ?? '',
+      materia: d.materia ?? '',
+      carnet: d.ci ?? '',
+      fechaNacimiento: d.fechaNacimiento ?? null,
+      materias: (d.materiasAsignadas ?? []).map((codigo) => ({ id: codigo, codigo, nombre: null })),
+    }));
+  }
+
+  async editarEstudiante(id: number, datos: any) {
+    const estudiante = await this.util.estudiantesRepo.findOne({ where: { id } });
+    if (!estudiante) throw new NotFoundException('Estudiante no encontrado.');
     if (typeof datos.carnetRetenidoOverride === 'boolean' || datos.carnetRetenidoOverride === null) {
       estudiante.carnetRetenidoOverride = datos.carnetRetenidoOverride;
       if (typeof datos.carnetRetenidoOverride === 'boolean') {
         estudiante.carnetRetenido = datos.carnetRetenidoOverride;
       }
     } else if (typeof datos.carnetRetenido === 'boolean') {
-      // Compatibilidad (UI antigua): tratamos el boolean como override manual.
       estudiante.carnetRetenidoOverride = datos.carnetRetenido;
       estudiante.carnetRetenido = datos.carnetRetenido;
     }
-
-    let actualizado = await this.estudiantesRepo.save(estudiante);
-
-    // Si quedó en automático, recalculamos según préstamos activos.
-    if (actualizado.carnetRetenidoOverride === null) {
-      await this.sincronizarCarnetRetenidoEstudiante(actualizado.id);
-      actualizado = (await this.estudiantesRepo.findOne({ where: { id: actualizado.id } })) ?? actualizado;
+    const guardado = await this.util.estudiantesRepo.save(estudiante);
+    if (guardado.carnetRetenidoOverride === null) {
+      await this.util.sincronizarCarnetRetenidoEstudiante(guardado.id);
     }
-
-    await this.registrarEventoInterno({
-      entidad: 'Estudiante',
-      entidadId: actualizado.id,
-      accion: 'actualizar',
-      detalle: {
-        antes: snapshotAntes,
-        despues: actualizado,
-      },
-    });
-    return actualizado;
+    return guardado;
   }
 
-  async eliminarEstudiante(id: number): Promise<void> {
-    const estudiante = await this.estudiantesRepo.findOne({ where: { id } });
-    if (!estudiante) {
-      throw new NotFoundException('Estudiante no encontrado.');
-    }
-    await this.registrarEventoInterno({
-      entidad: 'Estudiante',
-      entidadId: estudiante.id,
-      accion: 'eliminar',
-      detalle: estudiante as unknown as Record<string, unknown>,
-    });
-    await this.estudiantesRepo.softRemove(estudiante);
+  async obtenerCarreras() {
+    return this.carreraServicio.obtenerCarreras();
+  }
+  async crearCarrera(datos: any) {
+    return this.carreraServicio.crearCarrera(datos);
+  }
+  async editarCarrera(id: number, datos: any) {
+    return this.carreraServicio.editarCarrera(id, datos);
+  }
+  async eliminarCarrera(id: number) {
+    return this.carreraServicio.eliminarCarrera(id);
   }
 
-  async crearDocente(datos: {
-    codigo: string;
-    nombre: string;
-    apellido: string;
-    materia: string;
-    carnet: string;
-    materias?: string[];
-    materiasIds?: number[];
-  }): Promise<DocenteEntidad> {
-    const codigo = datos.codigo.trim();
-    const carnet = datos.carnet.trim();
-
-    const existenteCodigo = await this.docentesRepo.findOne({ where: { codigo } });
-    if (existenteCodigo) {
-      throw new BadRequestException('El código de docente ya está registrado.');
-    }
-
-    const existenteCarnet = await this.docentesRepo.findOne({ where: { carnet } });
-    if (existenteCarnet) {
-      throw new BadRequestException('El carnet ya está registrado.');
-    }
-
-    const materias = await this.resolverMateriasParaDocente({ materias: datos.materias, materiasIds: datos.materiasIds, materia: datos.materia });
-    const materiaPrimaria = materias[0]?.codigo ?? datos.materia.trim();
-
-    const docente = this.docentesRepo.create({
-      codigo,
-      nombre: datos.nombre.trim(),
-      apellido: datos.apellido.trim(),
-      materia: materiaPrimaria,
-      carnet,
-      materias,
-    });
-    const creado = await this.docentesRepo.save(docente);
-    await this.registrarEventoInterno({
-      entidad: 'Docente',
-      entidadId: creado.id,
-      accion: 'crear',
-      detalle: creado as unknown as Record<string, unknown>,
-    });
-    return creado;
+  async obtenerMaterias() {
+    return this.materiaServicio.obtenerMaterias();
+  }
+  async crearMateria(datos: any) {
+    return this.materiaServicio.crearMateria(datos);
+  }
+  async editarMateria(id: number, datos: any) {
+    return this.materiaServicio.editarMateria(id, datos);
+  }
+  async eliminarMateria(id: number) {
+    return this.materiaServicio.eliminarMateria(id);
   }
 
-  async editarDocente(
-    id: number,
-    datos: Partial<{
-      codigo: string;
-      nombre: string;
-      apellido: string;
-      materia: string;
-      carnet: string;
-      materias?: string[];
-      materiasIds?: number[];
-    }>,
-  ): Promise<DocenteEntidad> {
-    const docente = await this.docentesRepo.findOne({ where: { id }, relations: ['materias'] });
-    if (!docente) {
-      throw new NotFoundException('Docente no encontrado.');
-    }
-    const snapshotAntes = { ...docente };
-
-    if (datos.codigo && datos.codigo.trim() !== docente.codigo) {
-      const existente = await this.docentesRepo.findOne({ where: { codigo: datos.codigo.trim() } });
-      if (existente) {
-        throw new BadRequestException('El código de docente ya está registrado.');
-      }
-      docente.codigo = datos.codigo.trim();
-    }
-
-    if (datos.carnet && datos.carnet.trim() !== docente.carnet) {
-      const existente = await this.docentesRepo.findOne({ where: { carnet: datos.carnet.trim() } });
-      if (existente) {
-        throw new BadRequestException('El carnet ya está registrado.');
-      }
-      docente.carnet = datos.carnet.trim();
-    }
-
-    if (typeof datos.nombre === 'string') docente.nombre = datos.nombre.trim();
-    if (typeof datos.apellido === 'string') docente.apellido = datos.apellido.trim();
-    if (typeof datos.materia === 'string') docente.materia = datos.materia.trim();
-
-    if (Array.isArray(datos.materiasIds) || Array.isArray(datos.materias)) {
-      const materias = await this.resolverMateriasParaDocente({ materias: datos.materias, materiasIds: datos.materiasIds, materia: datos.materia ?? docente.materia });
-      docente.materias = materias;
-      if (materias[0]?.codigo) {
-        docente.materia = materias[0].codigo;
-      }
-    }
-
-    const actualizado = await this.docentesRepo.save(docente);
-    await this.registrarEventoInterno({
-      entidad: 'Docente',
-      entidadId: actualizado.id,
-      accion: 'actualizar',
-      detalle: {
-        antes: snapshotAntes,
-        despues: actualizado,
-      },
-    });
-    return actualizado;
+  async obtenerCanastasPrestamo(ejecutor?: any) {
+    return this.prestamoCanastaServicio.obtenerCanastasPrestamo(ejecutor);
   }
-
-  async eliminarDocente(id: number): Promise<void> {
-    const docente = await this.docentesRepo.findOne({ where: { id } });
-    if (!docente) {
-      throw new NotFoundException('Docente no encontrado.');
-    }
-    await this.registrarEventoInterno({
-      entidad: 'Docente',
-      entidadId: docente.id,
-      accion: 'eliminar',
-      detalle: docente as unknown as Record<string, unknown>,
-    });
-    await this.docentesRepo.softRemove(docente);
+  async crearCanastaPrestamo(datos: any, ejecutor?: any) {
+    return this.prestamoCanastaServicio.crearCanastaPrestamo(datos, ejecutor);
   }
-
-  async eliminarPrestamo(id: number): Promise<void> {
-    const prestamo = await this.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
-    if (!prestamo) {
-      throw new NotFoundException('Préstamo no encontrado.');
-    }
-
-    await this.registrarEventoInterno({
-      entidad: 'Prestamo',
-      entidadId: prestamo.id,
-      accion: 'eliminar',
-      detalle: this.mapPrestamoDto(prestamo),
-    });
-
-    await this.prestamosRepo.softRemove(prestamo);
-    await this.sincronizarCarnetRetenidoEstudiante(prestamo.estudiante.id);
-    await this.sincronizarCarnetsRetenidosEnLote();
+  async editarCanastaPrestamo(canastaId: string, datos: any, ejecutor?: any) {
+    return this.prestamoCanastaServicio.editarCanastaPrestamo(canastaId, datos, ejecutor);
+  }
+  async extenderCanastaPrestamo(canastaId: string, fechaDevolucion: string, ejecutor?: any) {
+    return this.prestamoCanastaServicio.extenderCanastaPrestamo(canastaId, fechaDevolucion, ejecutor);
+  }
+  async aceptarCanastaPrestamo(canastaId: string, ejecutor?: any) {
+    return this.prestamoCanastaServicio.aceptarCanastaPrestamo(canastaId, ejecutor);
+  }
+  async rechazarCanastaPrestamo(canastaId: string, motivo: string, ejecutor?: any) {
+    return this.prestamoCanastaServicio.rechazarCanastaPrestamo(canastaId, motivo, ejecutor);
+  }
+  async despacharCanastaPrestamo(canastaId: string, datos: any, ejecutor?: any) {
+    return this.prestamoCanastaServicio.despacharCanastaPrestamo(canastaId, datos, ejecutor);
+  }
+  async devolverCanastaPrestamo(canastaId: string, ejecutor?: any) {
+    return this.prestamoCanastaServicio.devolverCanastaPrestamo(canastaId, ejecutor);
+  }
+  async devolverCanastaPrestamoCompleto(canastaId: string, datos: any, ejecutor?: any) {
+    return this.prestamoCanastaServicio.devolverCanastaPrestamoCompleto(canastaId, datos, ejecutor);
+  }
+  async eliminarCanastaPrestamo(canastaId: string, ejecutor?: any) {
+    return this.prestamoCanastaServicio.eliminarCanastaPrestamo(canastaId, ejecutor);
   }
 }

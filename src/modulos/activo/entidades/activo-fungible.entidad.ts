@@ -1,4 +1,5 @@
-import { Column, CreateDateColumn, DeleteDateColumn, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { InventarioEntidad } from '@/modulos/inventario/entidades/inventario.entidad';
+import { Column, CreateDateColumn, DeleteDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { ItemActivoFungible } from './item-activo-fungible.entidad';
 
 export enum TipoCantidadFungible {
@@ -26,7 +27,6 @@ export class ActivoFungible {
     @Column({ type: 'text', nullable: true })
     descripcion?: string;
 
-    // Define cómo se mide el activo fungible (g, kg, L, ml, unidades, etc.)
     @Column({ name: 'unidad_medida', type: 'varchar', length: 30, default: 'unidades' })
     unidad_medida!: string;
 
@@ -44,6 +44,10 @@ export class ActivoFungible {
 
     @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
     deleted_at?: Date | null;
+
+    @ManyToOne(() => InventarioEntidad, (inventario: InventarioEntidad) => inventario.activosFungibles, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'id_inventario' })
+    inventario?: InventarioEntidad | null;
 
     @OneToMany(() => ItemActivoFungible, (item) => item.activo)
     items!: ItemActivoFungible[];

@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, DeleteDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, DeleteDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { ActivoFijo } from '@/modulos/activo/entidades/activo-fijo.entidad';
+import { InventarioEntidad } from '@/modulos/inventario/entidades/inventario.entidad';
 
 @Entity('contenedores_activos')
 export class ContenedorActivo {
@@ -17,6 +18,13 @@ export class ContenedorActivo {
 
     @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
     deleted_at?: Date | null;
+
+    @ManyToOne(() => InventarioEntidad, (inventario: InventarioEntidad) => inventario.contenedores, {
+        nullable: true,
+        onDelete: 'SET NULL',
+    })
+    @JoinColumn({ name: 'id_inventario' })
+    inventario?: InventarioEntidad | null;
 
     @OneToMany(() => ActivoFijo, (activo: ActivoFijo) => activo.contenedor)
     activos!: ActivoFijo[];

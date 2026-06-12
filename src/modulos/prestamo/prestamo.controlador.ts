@@ -1,70 +1,23 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, UseGuards, Request } from '@nestjs/common';
 import { PrestamoServicio } from './prestamo.servicio';
+import { JwtAutenticacionGuardia } from '@/modulos/autenticacion/guardias/jwt-autenticacion.guardia';
+import { Roles } from '@/modulos/autenticacion/guardias/roles.decorador';
+import { RolesGuardia } from '@/modulos/autenticacion/guardias/roles.guardia';
+import type { RolUsuario } from '@/modulos/usuario/entidades/usuario.entidad';
 
 @Controller('prestamos')
+@UseGuards(JwtAutenticacionGuardia, RolesGuardia)
 export class PrestamoControlador {
   constructor(private readonly prestamoServicio: PrestamoServicio) {}
 
-  @Get('materias')
-  async obtenerMaterias() {
-    return this.prestamoServicio.obtenerMaterias();
-  }
-
-  @Post('materias')
-  async crearMateria(@Body() body: { codigo: string; nombre?: string | null }) {
-    return this.prestamoServicio.crearMateria(body);
-  }
-
-  @Put('materias/:id')
-  async editarMateria(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: Partial<{ codigo: string; nombre: string | null }>,
-  ) {
-    return this.prestamoServicio.editarMateria(id, body);
-  }
-
-  @Delete('materias/:id')
-  async eliminarMateria(@Param('id', ParseIntPipe) id: number) {
-    await this.prestamoServicio.eliminarMateria(id);
-    return { ok: true };
-  }
-
-  @Get('carreras')
-  async obtenerCarreras() {
-    return this.prestamoServicio.obtenerCarreras();
-  }
-
-  @Post('carreras')
-  async crearCarrera(@Body() body: { nombre: string }) {
-    return this.prestamoServicio.crearCarrera(body);
-  }
-
-  @Put('carreras/:id')
-  async editarCarrera(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: Partial<{ nombre: string }>,
-  ) {
-    return this.prestamoServicio.editarCarrera(id, body);
-  }
-
-  @Delete('carreras/:id')
-  async eliminarCarrera(@Param('id', ParseIntPipe) id: number) {
-    await this.prestamoServicio.eliminarCarrera(id);
-    return { ok: true };
-  }
-
   @Get()
-  async obtenerPrestamos() {
-    return this.prestamoServicio.obtenerPrestamos();
-  }
-
-  @Get('canastas')
-  async obtenerCanastas() {
-    return this.prestamoServicio.obtenerCanastasPrestamo();
+  async obtenerPrestamos(@Request() req: any) {
+    return this.prestamoServicio.obtenerPrestamos(req.user);
   }
 
   @Post()
   async crearPrestamo(
+    @Request() req: any,
     @Body()
     body: {
       carnetEstudiante: string;
@@ -73,30 +26,15 @@ export class PrestamoControlador {
       fechaPrestamo: string;
       fechaDevolucion: string;
       observaciones?: string;
+      carnetRetenido?: boolean;
     },
   ) {
-    return this.prestamoServicio.crearPrestamo(body);
-  }
-
-  @Post('canasta')
-  async crearCanastaPrestamo(
-    @Body()
-    body: {
-      carnetEstudiante?: string;
-      carnetsEstudiantes?: string[];
-      idDocente: number;
-      fechaPrestamo: string;
-      fechaDevolucion: string;
-      observaciones?: string;
-      equipos: string[];
-      consumibles: Array<{ idLote: string; cantidad: number; motivo: string }>;
-    },
-  ) {
-    return this.prestamoServicio.crearCanastaPrestamo(body);
+    return this.prestamoServicio.crearPrestamo(body, req.user);
   }
 
   @Put(':id')
   async editarPrestamo(
+    @Request() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body()
     body: Partial<{
@@ -107,32 +45,106 @@ export class PrestamoControlador {
       observaciones: string;
       idDocente: number;
       estado: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite';
+      carnetRetenido: boolean;
     }>,
   ) {
-    return this.prestamoServicio.editarPrestamo(id, body);
+    return this.prestamoServicio.editarPrestamo(id, body, req.user);
   }
 
   @Post(':id/extender')
   async extenderPrestamo(
+    @Request() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { fechaDevolucion: string },
   ) {
-    return this.prestamoServicio.extenderFechaDevolucion(id, body.fechaDevolucion);
+    return this.prestamoServicio.extenderFechaDevolucion(id, body.fechaDevolucion, req.user);
   }
 
-  @Post(':id/devolver')
-  async devolverPrestamo(@Param('id', ParseIntPipe) id: number) {
-    return this.prestamoServicio.marcarDevuelto(id);
+  @Put(':id/aceptar')
+  async aceptarPrestamo(@Request() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.prestamoServicio.aceptarPrestamo(id, req.user);
+  }
+
+  @Put(':id/rechazar')
+  async rechazarPrestamo(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { motivo: string },
+  ) {
+    return this.prestamoServicio.rechazarPrestamo(id, body.motivo, req.user);
+  }
+
+  @Put(':id/despachar')
+  async despacharPrestamo(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { estadoFisicoEntrega?: string; carnetRetenido?: boolean },
+  ) {
+    return this.prestamoServicio.despacharPrestamo(id, body, req.user);
+  }
+
+  @Put(':id/devolver')
+  async devolverPrestamo(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { estadoFisicoDevolucion?: string; carnetDevuelto?: boolean; observaciones?: string },
+  ) {
+    return this.prestamoServicio.devolverPrestamoCompleto(id, body, req.user);
   }
 
   @Delete(':id')
-  async eliminarPrestamo(@Param('id', ParseIntPipe) id: number) {
-    await this.prestamoServicio.eliminarPrestamo(id);
+  async eliminarPrestamo(@Request() req: any, @Param('id', ParseIntPipe) id: number) {
+    await this.prestamoServicio.eliminarPrestamo(id, req.user);
     return { ok: true };
+  }
+
+  @Get(':id/historial')
+  @Roles('administrador')
+  async obtenerHistorialPrestamo(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.prestamoServicio.obtenerHistorialPrestamo(id, req.user);
+  }
+
+  @Put('estudiantes/:id')
+  async editarEstudiante(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() datos: Partial<{
+      carnetRetenido: boolean;
+      carnetRetenidoOverride: boolean | null;
+    }>,
+  ) {
+    return this.prestamoServicio.editarEstudiante(id, datos);
+  }
+
+  @Get('canastas')
+  async obtenerCanastas(@Request() req: any) {
+    return this.prestamoServicio.obtenerCanastasPrestamo(req.user);
+  }
+
+  @Post('canastas')
+  async crearCanastaPrestamo(
+    @Request() req: any,
+    @Body()
+    body: {
+      carnetEstudiante?: string;
+      carnetsEstudiantes?: string[];
+      idDocente: number;
+      fechaPrestamo: string;
+      fechaDevolucion: string;
+      observaciones?: string;
+      items?: Array<{ idItem?: string; idHerramienta?: string; registrado?: boolean }>;
+      equipos: string[];
+      consumibles: Array<{ idLote: string; cantidad: number; motivo: string }>;
+    },
+  ) {
+    return this.prestamoServicio.crearCanastaPrestamo(body, req.user);
   }
 
   @Put('canastas/:id')
   async editarCanasta(
+    @Request() req: any,
     @Param('id') canastaId: string,
     @Body()
     body: Partial<{
@@ -142,98 +154,72 @@ export class PrestamoControlador {
       fechaDevolucion: string | null;
       observaciones: string;
       idDocente: number;
+      items: Array<{ idItem?: string; idHerramienta?: string; registrado?: boolean }>;
       estado: 'activo' | 'pendiente' | 'devuelto' | 'vencido' | 'devuelto_fuera_de_fecha_limite';
     }>,
   ) {
-    return this.prestamoServicio.editarCanastaPrestamo(canastaId, body);
+    return this.prestamoServicio.editarCanastaPrestamo(canastaId, body, req.user);
   }
 
   @Post('canastas/:id/extender')
   async extenderCanasta(
+    @Request() req: any,
     @Param('id') canastaId: string,
     @Body() body: { fechaDevolucion: string },
   ) {
-    return this.prestamoServicio.extenderCanastaPrestamo(canastaId, body.fechaDevolucion);
+    return this.prestamoServicio.extenderCanastaPrestamo(canastaId, body.fechaDevolucion, req.user);
   }
 
-  @Post('canastas/:id/devolver')
-  async devolverCanasta(@Param('id') canastaId: string) {
-    return this.prestamoServicio.devolverCanastaPrestamo(canastaId);
+  @Put('canastas/:id/aceptar')
+  async aceptarCanasta(@Request() req: any, @Param('id') canastaId: string) {
+    return this.prestamoServicio.aceptarCanastaPrestamo(canastaId, req.user);
+  }
+
+  @Put('canastas/:id/rechazar')
+  async rechazarCanasta(
+    @Request() req: any,
+    @Param('id') canastaId: string,
+    @Body() body: { motivo: string },
+  ) {
+    return this.prestamoServicio.rechazarCanastaPrestamo(canastaId, body.motivo, req.user);
+  }
+
+  @Put('canastas/:id/despachar')
+  async despacharCanasta(
+    @Request() req: any,
+    @Param('id') canastaId: string,
+    @Body() body: {
+      equipos?: Array<{ idHerramienta: string; registrado: boolean; estadoFisicoEntrega?: string }>;
+      consumibles?: Array<{ idLote: string; cantidad: number }>;
+      carnetsRetenidos?: string[];
+    },
+  ) {
+    return this.prestamoServicio.despacharCanastaPrestamo(canastaId, body, req.user);
+  }
+
+  @Put('canastas/:id/devolver')
+  async devolverCanasta(
+    @Request() req: any,
+    @Param('id') canastaId: string,
+    @Body() body: {
+      equipos?: Array<{ idHerramienta: string; estadoFisicoDevolucion: string; devuelto: boolean }>;
+      consumibles?: Array<{ idLote: string; cantidadDevuelta: number; estadoDevuelto?: string }>;
+      carnetsDevueltos?: string[];
+      observaciones?: string;
+    },
+  ) {
+    return this.prestamoServicio.devolverCanastaPrestamoCompleto(canastaId, body, req.user);
   }
 
   @Delete('canastas/:id')
-  async eliminarCanasta(@Param('id') canastaId: string) {
-    await this.prestamoServicio.eliminarCanastaPrestamo(canastaId);
+  async eliminarCanasta(@Request() req: any, @Param('id') canastaId: string) {
+    await this.prestamoServicio.eliminarCanastaPrestamo(canastaId, req.user);
     return { ok: true };
   }
 
-  @Get('estudiantes')
-  async obtenerEstudiantes() {
-    return this.prestamoServicio.obtenerEstudiantes();
-  }
-
-  @Post('estudiantes')
-  async crearEstudiante(
-    @Body()
-    body: {
-      carnet: string;
-      nombre: string;
-      apellido: string;
-      carrera: string;
-      semestre: number;
-      carnetRetenido?: boolean;
-      carnetRetenidoOverride?: boolean | null;
-    },
-  ) {
-    return this.prestamoServicio.crearEstudiante(body);
-  }
-
-  @Put('estudiantes/:id')
-  async editarEstudiante(
-    @Param('id', ParseIntPipe) id: number,
-    @Body()
-    body: Partial<{
-      carnet: string;
-      nombre: string;
-      apellido: string;
-      carrera: string;
-      semestre: number;
-      carnetRetenido: boolean;
-      carnetRetenidoOverride: boolean | null;
-    }>,
-  ) {
-    return this.prestamoServicio.editarEstudiante(id, body);
-  }
-
-  @Delete('estudiantes/:id')
-  async eliminarEstudiante(@Param('id', ParseIntPipe) id: number) {
-    await this.prestamoServicio.eliminarEstudiante(id);
-    return { ok: true };
-  }
-
-  @Get('docentes')
-  async obtenerDocentes() {
-    return this.prestamoServicio.obtenerDocentes();
-  }
-
-  @Post('docentes')
-  async crearDocente(
-    @Body() body: { codigo: string; nombre: string; apellido: string; materia: string; carnet: string; materias?: string[]; materiasIds?: number[] },
-  ) {
-    return this.prestamoServicio.crearDocente(body);
-  }
-
-  @Put('docentes/:id')
-  async editarDocente(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: Partial<{ codigo: string; nombre: string; apellido: string; materia: string; carnet: string; materias?: string[]; materiasIds?: number[] }>,
-  ) {
-    return this.prestamoServicio.editarDocente(id, body);
-  }
-
-  @Delete('docentes/:id')
-  async eliminarDocente(@Param('id', ParseIntPipe) id: number) {
-    await this.prestamoServicio.eliminarDocente(id);
-    return { ok: true };
+  @Get('mi-dashboard')
+  @Roles('estudiante' as RolUsuario)
+  async obtenerMiDashboard(@Request() req: any) {
+    return this.prestamoServicio.obtenerDashboardEstudiante(req.user.id);
   }
 }

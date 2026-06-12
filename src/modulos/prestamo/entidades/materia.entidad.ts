@@ -1,22 +1,21 @@
-import { Entity, PrimaryGeneratedColumn, Column, DeleteDateColumn, ManyToMany } from 'typeorm';
-import { DocenteEntidad } from './docente.entidad';
+import { Column, Entity, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from 'typeorm';
+
 
 @Entity('materias')
 export class MateriaEntidad {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ length: 30, unique: true })
+  @Column({ type: 'varchar', length: 30, unique: true })
   codigo!: string;
 
-  // Importante: con `string | null`, TypeScript emite `design:type = Object`.
-  // TypeORM no soporta inferir "Object" en Postgres, así que fijamos el tipo.
-  @Column({ type: 'varchar', length: 120, nullable: true })
-  nombre!: string | null;
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  nombre?: string | null;
 
-  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt?: Date | null;
+  @Column({ type: 'text', nullable: true })
+  descripcion?: string | null;
 
-  @ManyToMany(() => DocenteEntidad, (docente: DocenteEntidad) => docente.materias)
-  docentes!: DocenteEntidad[];
+  @Column({ name: 'carreras_habilitadas_ids', type: 'simple-array', nullable: true })
+  carrerasHabilitadasIds?: string[] | null;
+
 }

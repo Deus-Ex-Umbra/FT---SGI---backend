@@ -1,4 +1,4 @@
 export class InicioSesionDto {
-    nombre_usuario!: string;
+    identificador!: string;
     contrasena!: string;
 }

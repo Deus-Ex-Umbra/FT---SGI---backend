@@ -13,7 +13,6 @@ export class GeminiServicio {
       throw new BadRequestException('No hay clave de API Gemini configurada.');
     }
 
-    // Nota: el SDK usa el endpoint por defecto; guardamos URL por si luego migras a proxy propio.
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const result = await model.generateContent(prompt);

@@ -1,5 +1,3 @@
-// Estado físico (condición) por *item/instancia* del activo fijo.
-// Independiente del flujo/estado operativo.
 
 export const ESTADOS_FISICOS_ITEM_ACTIVO = ['bueno', 'regular', 'malo'] as const;
 

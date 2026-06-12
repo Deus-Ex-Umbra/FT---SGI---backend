@@ -1,5 +1,3 @@
-// Nota: El estado es por *item/instancia* del activo fijo.
-// La máquina de estados controla disponibilidad/flujo operativo.
 export const ESTADOS_ITEM_ACTIVO = [
   'disponible',
   'en_prestamo',
@@ -11,36 +9,27 @@ export const ESTADOS_ITEM_ACTIVO = [
 export type EstadoItemActivo = typeof ESTADOS_ITEM_ACTIVO[number];
 
 export const ESTADO_ALIAS: Record<string, EstadoItemActivo> = {
-  // aliases de entrada
   'en prestamo': 'en_prestamo',
   enprestamo: 'en_prestamo',
   prestado: 'en_prestamo',
   prestamo: 'en_prestamo',
-
-  // Estado eliminado (compat): se interpreta como mantenimiento
   en_revision: 'en_mantenimiento',
   revision: 'en_mantenimiento',
   'en revision': 'en_mantenimiento',
   enrevision: 'en_mantenimiento',
   revisado: 'en_mantenimiento',
-
   mantenimiento: 'en_mantenimiento',
   'en mantenimiento': 'en_mantenimiento',
   enmantenimiento: 'en_mantenimiento',
-
   extraviado: 'extraviado',
   perdido: 'extraviado',
 
   baja: 'dado_de_baja',
   dado_de_baja: 'dado_de_baja',
-
-  // legacy (compatibilidad con datos antiguos)
   buen_estado: 'disponible',
   regular: 'disponible',
   danado: 'en_mantenimiento',
 };
-
-// Grafo dirigido de transiciones permitidas.
 export const TRANSICIONES_ESTADO_ITEM: Record<EstadoItemActivo, EstadoItemActivo[]> = {
   disponible: ['en_prestamo', 'en_mantenimiento', 'extraviado', 'dado_de_baja'],
   en_prestamo: ['disponible', 'en_mantenimiento', 'extraviado'],
@@ -48,8 +37,6 @@ export const TRANSICIONES_ESTADO_ITEM: Record<EstadoItemActivo, EstadoItemActivo
   extraviado: ['disponible', 'en_mantenimiento', 'dado_de_baja'],
   dado_de_baja: [],
 };
-
-// Justificación requerida cuando se ingresa a estados sensibles.
 export const TRANSICIONES_CON_JUSTIFICACION: Array<{ desde: EstadoItemActivo; hacia: EstadoItemActivo }> = [
   { desde: 'en_prestamo', hacia: 'extraviado' },
   { desde: 'disponible', hacia: 'dado_de_baja' },
