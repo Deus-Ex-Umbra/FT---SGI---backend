@@ -1018,9 +1018,17 @@ export class PrestamoCanastaServicio {
     }
 
     const prestamosActualizados = await this.resolverPrestamosPorCanastaId(canastaId);
+    const ahora = new Date();
     for (const p of prestamosActualizados) {
       p.estado = 'despachado';
-      p.fechaPrestamo = new Date(); // Update start date/time
+
+      if (p.fechaDevolucion && p.fechaDevolucion.getTime() <= ahora.getTime()) {
+        const difOriginal = p.fechaDevolucion.getTime() - p.fechaPrestamo.getTime();
+        const duracion = difOriginal > 0 ? difOriginal : 24 * 60 * 60 * 1000;
+        p.fechaDevolucion = new Date(ahora.getTime() + duracion);
+      }
+
+      p.fechaPrestamo = ahora; // Update start date/time
       if (consumiblesDespachados.length > 0) p.consumibles = consumiblesDespachados;
       await this.util.prestamosRepo.save(p);
       await this.util.registrarCambioHistorial(p, 'despacho', p.estado, 'Préstamo despachado.', ejecutor);

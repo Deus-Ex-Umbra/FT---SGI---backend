@@ -479,7 +479,15 @@ export class PrestamoServicio {
 
     const estadoAnterior = prestamo.estado;
     prestamo.estado = 'despachado';
-    prestamo.fechaPrestamo = new Date(); // Update start date/time
+    const ahora = new Date();
+
+    if (prestamo.fechaDevolucion && prestamo.fechaDevolucion.getTime() <= ahora.getTime()) {
+      const difOriginal = prestamo.fechaDevolucion.getTime() - prestamo.fechaPrestamo.getTime();
+      const duracion = difOriginal > 0 ? difOriginal : 24 * 60 * 60 * 1000;
+      prestamo.fechaDevolucion = new Date(ahora.getTime() + duracion);
+    }
+
+    prestamo.fechaPrestamo = ahora; // Update start date/time
     prestamo.estadoFisicoEntrega = datos.estadoFisicoEntrega || 'bueno';
 
     const retenido = typeof datos.carnetRetenido === 'boolean' ? datos.carnetRetenido : true;
