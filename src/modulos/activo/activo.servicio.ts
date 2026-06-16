@@ -24,8 +24,12 @@ export class ActivoServicio {
         return this.contenedorServicio.obtenerContenedores(usuario);
     }
 
+    async obtenerContenedoresPorInventario(idInventario: number): Promise<ContenedorActivo[]> {
+        return this.contenedorServicio.obtenerContenedoresPorInventario(idInventario);
+    }
+
     async crearContenedor(
-        datos: { nombre: string; ubicacion: string; idInventario?: number },
+        datos: { nombre: string; ubicacion: string; idInventario?: number; visible?: boolean },
         usuario: UsuarioAutenticado,
     ): Promise<ContenedorActivo> {
         return this.contenedorServicio.crearContenedor(datos, usuario);
@@ -33,7 +37,7 @@ export class ActivoServicio {
 
     async editarContenedor(
         id: number,
-        datos: Partial<{ nombre: string; ubicacion: string; idInventario: number }>,
+        datos: Partial<{ nombre: string; ubicacion: string; idInventario: number; visible: boolean }>,
         usuario: UsuarioAutenticado,
     ): Promise<ContenedorActivo> {
         return this.contenedorServicio.editarContenedor(id, datos, usuario);

@@ -6,6 +6,7 @@ import { EnlaceFirmadoServicio } from '@/modulos/enlace-firmado/enlace-firmado.s
 import { ConfiguracionIAEntidad } from './entidades/configuracion-ia.entidad';
 import { ActualizarConfiguracionIADto } from './dto/actualizar-configuracion-ia.dto';
 import { ConfiguracionRegistroEstudianteEntidad } from './entidades/configuracion-registro-estudiante.entidad';
+import { ConfiguracionRegistroDocenteEntidad } from './entidades/configuracion-registro-docente.entidad';
 
 @Injectable()
 export class ConfiguracionServicio {
@@ -16,6 +17,8 @@ export class ConfiguracionServicio {
     private readonly repoUsuario: Repository<Usuario>,
     @InjectRepository(ConfiguracionRegistroEstudianteEntidad)
     private readonly repoRegistroEstudiante: Repository<ConfiguracionRegistroEstudianteEntidad>,
+    @InjectRepository(ConfiguracionRegistroDocenteEntidad)
+    private readonly repoRegistroDocente: Repository<ConfiguracionRegistroDocenteEntidad>,
     private readonly enlaceFirmadoServicio: EnlaceFirmadoServicio,
   ) {}
 
@@ -28,6 +31,17 @@ export class ConfiguracionServicio {
       registroEstudianteHabilitado: true,
     });
     return await this.repoRegistroEstudiante.save(nueva);
+  }
+
+  private async obtenerRegistroDocenteEntidad(): Promise<ConfiguracionRegistroDocenteEntidad> {
+    const existente = await this.repoRegistroDocente.findOne({ where: { id: 1 } });
+    if (existente) return existente;
+
+    const nueva = this.repoRegistroDocente.create({
+      id: 1,
+      registroDocenteHabilitado: true,
+    });
+    return await this.repoRegistroDocente.save(nueva);
   }
 
   async obtenerIA(usuarioId: number): Promise<ConfiguracionIAEntidad> {
@@ -72,5 +86,25 @@ export class ConfiguracionServicio {
     }
 
     return { habilitado: cfg.registroEstudianteHabilitado };
+  }
+
+  async obtenerRegistroDocente() {
+    const cfg = await this.obtenerRegistroDocenteEntidad();
+    return { habilitado: cfg.registroDocenteHabilitado };
+  }
+
+  async actualizarRegistroDocente(habilitado: boolean) {
+    const cfg = await this.obtenerRegistroDocenteEntidad();
+
+    const habilitadoNormalizado = Boolean(habilitado);
+    const huboCambio = cfg.registroDocenteHabilitado !== habilitadoNormalizado;
+    cfg.registroDocenteHabilitado = habilitadoNormalizado;
+    await this.repoRegistroDocente.save(cfg);
+
+    if (huboCambio) {
+      await this.enlaceFirmadoServicio.deshabilitarInvitacionRegistroDocente();
+    }
+
+    return { habilitado: cfg.registroDocenteHabilitado };
   }
 }

@@ -8,6 +8,7 @@ import { InicioSesionDto } from './dto/inicio-sesion.dto';
 import { CambiarContrasenaDto } from './dto/cambiar-contrasena.dto';
 import { CambiarCorreoDto } from './dto/cambiar-correo.dto';
 import { CrearEstudianteDto } from '@/modulos/estudiante/dto/crear-estudiante.dto';
+import { CrearDocenteDto } from '@/modulos/docente/dto/crear-docente.dto';
 
 import { DocenteServicio } from '@/modulos/docente/docente.servicio';
 import { EstudianteServicio } from '@/modulos/estudiante/estudiante.servicio';
@@ -74,6 +75,17 @@ export class AutenticacionServicio {
                         throw new UnauthorizedException('Tu registro está pendiente de aprobación por el encargado de inventario.');
                     }
                     if (estudiante.estadoAprobacion === 'rechazado') {
+                        throw new UnauthorizedException('Tu solicitud de registro ha sido rechazada.');
+                    }
+                }
+            }
+            if (usuario.rol === 'docente') {
+                const docente = await this.docenteServicio.buscarPorIdUsuario(usuario.id).catch(() => null);
+                if (docente) {
+                    if (docente.estadoAprobacion === 'pendiente') {
+                        throw new UnauthorizedException('Tu registro está pendiente de aprobación por el encargado de inventario.');
+                    }
+                    if (docente.estadoAprobacion === 'rechazado') {
                         throw new UnauthorizedException('Tu solicitud de registro ha sido rechazada.');
                     }
                 }
@@ -246,6 +258,135 @@ export class AutenticacionServicio {
 
         try {
             const usuario = await this.estudianteServicio.crearEstudiante(dto, false);
+            return {
+                ok: true,
+                message: 'Registro completado correctamente.',
+                usuario,
+            };
+        } catch (error: any) {
+            return {
+                ok: false,
+                message: error?.message ?? 'No se pudo completar el registro.',
+            };
+        }
+    }
+
+    async generarUrlFirmadaRegistroDocente(creadoPorUsuarioId?: number) {
+        const estado = await this.configuracionServicio.obtenerRegistroDocente();
+        if (!estado.habilitado) {
+            return {
+                ok: false,
+                message: 'El registro público de docentes está deshabilitado.',
+            };
+        }
+
+        const invitacion = await this.enlaceFirmadoServicio.habilitarInvitacionRegistroDocente(creadoPorUsuarioId);
+
+        return {
+            ok: true,
+            ...invitacion,
+        };
+    }
+
+    async obtenerUrlFirmadaRegistroDocenteActiva() {
+        const estado = await this.configuracionServicio.obtenerRegistroDocente();
+        if (!estado.habilitado) {
+            return {
+                ok: false,
+                message: 'El registro público de docentes está deshabilitado.',
+            };
+        }
+
+        const invitacion = await this.enlaceFirmadoServicio.obtenerInvitacionRegistroDocenteActiva();
+        if (!invitacion) {
+            return {
+                ok: false,
+                message: 'No hay un enlace de registro activo.',
+            };
+        }
+
+        return {
+            ok: true,
+            ...invitacion,
+        };
+    }
+
+    async deshabilitarUrlFirmadaRegistroDocente() {
+        await this.enlaceFirmadoServicio.deshabilitarInvitacionRegistroDocente();
+
+        return {
+            ok: true,
+            message: 'La invitación de registro fue deshabilitada.',
+        };
+    }
+
+    async verificarRegistroDocenteConEnlaceFirmado(
+        firma: { eid: string; exp: string; nonce: string; sig: string },
+    ) {
+        const estado = await this.configuracionServicio.obtenerRegistroDocente();
+        if (!estado.habilitado) {
+            return {
+                ok: false,
+                message: 'El registro público de docentes está deshabilitado.',
+            };
+        }
+
+        const validacion = await this.enlaceFirmadoServicio.validarInvitacionFirmada(
+            {
+                eid: String(firma.eid ?? ''),
+                exp: String(firma.exp ?? ''),
+                nonce: String(firma.nonce ?? ''),
+                sig: String(firma.sig ?? ''),
+                tipo: 'registro_docente',
+                permiso: 'registro_docente_publico',
+                recursoId: null,
+            },
+            { registrarUso: false },
+        );
+
+        if (!validacion.ok) {
+            return {
+                ok: false,
+                message: validacion.message ?? 'El enlace de registro no está disponible.',
+            };
+        }
+
+        return {
+            ok: true,
+            message: 'Enlace válido.',
+        };
+    }
+
+    async registrarDocenteConEnlaceFirmado(
+        dto: CrearDocenteDto,
+        firma: { eid: string; exp: string; nonce: string; sig: string },
+    ) {
+        const estado = await this.configuracionServicio.obtenerRegistroDocente();
+        if (!estado.habilitado) {
+            return {
+                ok: false,
+                message: 'El registro público de docentes está deshabilitado.',
+            };
+        }
+
+        const validacion = await this.enlaceFirmadoServicio.validarInvitacionFirmada({
+            eid: String(firma.eid ?? ''),
+            exp: String(firma.exp ?? ''),
+            nonce: String(firma.nonce ?? ''),
+            sig: String(firma.sig ?? ''),
+            tipo: 'registro_docente',
+            permiso: 'registro_docente_publico',
+            recursoId: null,
+        });
+        if (!validacion.ok) {
+            return {
+                ok: false,
+                message: validacion.message ?? 'No se pudo validar el enlace de registro.',
+            };
+        }
+
+        try {
+            const usuario = await this.docenteServicio.crearDocente(dto, false);
             return {
                 ok: true,
                 message: 'Registro completado correctamente.',

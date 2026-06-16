@@ -7,6 +7,7 @@ import { InicioSesionDto } from './dto/inicio-sesion.dto';
 import { CambiarContrasenaDto } from './dto/cambiar-contrasena.dto';
 import { CambiarCorreoDto } from './dto/cambiar-correo.dto';
 import { CrearEstudianteDto } from '@/modulos/estudiante/dto/crear-estudiante.dto';
+import { CrearDocenteDto } from '@/modulos/docente/dto/crear-docente.dto';
 
 @Controller('auth')
 export class AutenticacionControlador {
@@ -63,6 +64,48 @@ export class AutenticacionControlador {
         @Body() dto: CrearEstudianteDto,
     ) {
         return this.autenticacionServicio.registrarEstudianteConEnlaceFirmado(dto, { eid, exp, nonce, sig });
+    }
+
+    @Post('registro-docentes/url-firmada')
+    @UseGuards(JwtAutenticacionGuardia, RolesGuardia)
+    @Roles('administrador')
+    async generarUrlFirmadaRegistroDocente(@Request() req: any) {
+        return this.autenticacionServicio.generarUrlFirmadaRegistroDocente(req.user?.id);
+    }
+
+    @Get('registro-docentes/url-firmada')
+    @UseGuards(JwtAutenticacionGuardia, RolesGuardia)
+    @Roles('administrador')
+    async obtenerUrlFirmadaRegistroDocenteActiva() {
+        return this.autenticacionServicio.obtenerUrlFirmadaRegistroDocenteActiva();
+    }
+
+    @Post('registro-docentes/url-firmada/deshabilitar')
+    @UseGuards(JwtAutenticacionGuardia, RolesGuardia)
+    @Roles('administrador')
+    async deshabilitarUrlFirmadaRegistroDocente() {
+        return this.autenticacionServicio.deshabilitarUrlFirmadaRegistroDocente();
+    }
+
+    @Get('registro-docentes/verificar')
+    async verificarRegistroDocenteConEnlaceFirmado(
+        @Query('eid') eid: string,
+        @Query('exp') exp: string,
+        @Query('nonce') nonce: string,
+        @Query('sig') sig: string,
+    ) {
+        return this.autenticacionServicio.verificarRegistroDocenteConEnlaceFirmado({ eid, exp, nonce, sig });
+    }
+
+    @Post('registro-docentes')
+    async registrarDocenteConEnlaceFirmado(
+        @Query('eid') eid: string,
+        @Query('exp') exp: string,
+        @Query('nonce') nonce: string,
+        @Query('sig') sig: string,
+        @Body() dto: CrearDocenteDto,
+    ) {
+        return this.autenticacionServicio.registrarDocenteConEnlaceFirmado(dto, { eid, exp, nonce, sig });
     }
 
     @Post('cambiar-contrasena')

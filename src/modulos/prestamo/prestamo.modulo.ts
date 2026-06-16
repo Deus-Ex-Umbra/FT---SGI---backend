@@ -24,6 +24,7 @@ import { Usuario } from '@/modulos/usuario/entidades/usuario.entidad';
 import { DocenteEntidad } from '@/modulos/docente/entidades/docente.entidad';
 import { GrupoMateriaDocenteEntidad } from '@/modulos/docencia/entidades/grupo-materia-docente.entidad';
 import { SubgrupoPrestamoDocenciaEntidad } from '@/modulos/docencia/entidades/subgrupo-prestamo-docencia.entidad';
+import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { SubgrupoPrestamoDocenciaEntidad } from '@/modulos/docencia/entidades/su
       SubgrupoPrestamoDocenciaEntidad,
       CarreraEntidad,
       MateriaEntidad,
+      ContenedorActivo,
     ]),
   ],
 

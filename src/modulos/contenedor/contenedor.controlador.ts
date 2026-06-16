@@ -18,7 +18,7 @@ export class ContenedorCompartidoControlador {
     @Post()
     async crear(
         @Request() req: { user: { id: number; rol: string; id_inventario?: number | null } },
-        @Body() body: { nombre: string; descripcion: string; idInventario?: number },
+        @Body() body: { nombre: string; descripcion: string; idInventario?: number; visible?: boolean },
     ) {
         return this.contenedorCompartidoServicio.crear(body, req.user);
     }
@@ -27,7 +27,7 @@ export class ContenedorCompartidoControlador {
     async editar(
         @Request() req: { user: { id: number; rol: string; id_inventario?: number | null } },
         @Param('id') _id: string,
-        @Body() body: { idActivo?: number; idMaterial?: number; nombre: string; descripcion: string; idInventario?: number },
+        @Body() body: { idActivo?: number; idMaterial?: number; nombre: string; descripcion: string; idInventario?: number; visible?: boolean },
     ) {
         return this.contenedorCompartidoServicio.editar(body, req.user);
     }

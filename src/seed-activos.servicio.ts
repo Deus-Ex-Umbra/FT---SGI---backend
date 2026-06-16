@@ -77,20 +77,24 @@ export class SeedActivosServicio {
 
         if (carpeta === 'gabinete-topografico') {
             if (n.includes('dron') || d.includes('dron') || n.includes('drone') || d.includes('drone')) {
-                return 'Contenedor de Drones';
+                return 'Drones';
             }
             if (
-                n.includes('gps') || d.includes('gps') ||
                 n.includes('gnss') || d.includes('gnss') ||
-                n.includes('gns') || d.includes('gns') ||
                 n.includes('receptor') || d.includes('receptor') ||
-                n.includes('magellan') || d.includes('magellan') ||
-                n.includes('garmin') || d.includes('garmin') ||
                 n.includes('trimble') || d.includes('trimble') ||
                 n.includes('ntrip') || d.includes('ntrip') ||
                 n.includes('satlab') || d.includes('satlab')
             ) {
-                return 'Contenedor de GNSS';
+                return 'GNSS';
+            }
+            if (
+                n.includes('gps') || d.includes('gps') ||
+                n.includes('gns') || d.includes('gns') ||
+                n.includes('magellan') || d.includes('magellan') ||
+                n.includes('garmin') || d.includes('garmin')
+            ) {
+                return 'GPS';
             }
             if (
                 n.includes('estacion total') || d.includes('estacion total') ||
@@ -101,28 +105,59 @@ export class SeedActivosServicio {
                 n.includes('leica') || d.includes('leica') ||
                 n.includes('geomax') || d.includes('geomax')
             ) {
-                return 'Contenedor de Estaciones Totales';
+                return 'Estaciones Totales';
             }
             if (n.includes('nivel') || d.includes('nivel')) {
-                return 'Contenedor de Niveles';
+                return 'Niveles';
             }
             if (
                 n.includes('brujula') || d.includes('brujula') ||
-                n.includes('brújula') || d.includes('brújula') ||
+                n.includes('brújula') || d.includes('brújula')
+            ) {
+                return 'Brújulas';
+            }
+            if (
                 n.includes('eclimetro') || d.includes('eclimetro') ||
                 n.includes('eclímetro') || d.includes('eclímetro') ||
                 n.includes('abney') || d.includes('abney') ||
                 n.includes('clinometer') || d.includes('clinometer')
             ) {
-                return 'Contenedor de Brújulas y Eclímetros';
+                return 'Eclímetros';
+            }
+            if (n.includes('estereoscopio') || d.includes('estereoscopio')) {
+                return 'Estereoscopios';
             }
             if (
-                n.includes('estereoscopio') || d.includes('estereoscopio') ||
                 n.includes('altimetro') || d.includes('altimetro') ||
                 n.includes('altímetro') || d.includes('altímetro') ||
                 n.includes('konus') || d.includes('konus')
             ) {
-                return 'Contenedor de Estereoscopios y Altimetros';
+                return 'Altímetros';
+            }
+            if (
+                n.includes('scaner') || d.includes('scaner') ||
+                n.includes('scanner') || d.includes('scanner') ||
+                n.includes('genius') || d.includes('genius')
+            ) {
+                return 'Escáner';
+            }
+            if (n.includes('mira') || d.includes('mira')) {
+                return 'Miras';
+            }
+            if (n.includes('tripode') || d.includes('trípode')) {
+                return 'Trípodes';
+            }
+            if (n.includes('prisma') || d.includes('prisma')) {
+                return 'Prismas';
+            }
+            if (
+                n.includes('jalon') || d.includes('jalón') ||
+                n.includes('baston') || d.includes('bastón')
+            ) {
+                return 'Jalones';
+            }
+            if (n.includes('distanciometro') || d.includes('distanciómetro')) {
+                return 'Distanciómetros';
             }
             if (
                 n.includes('computadora') || d.includes('computadora') ||
@@ -133,30 +168,16 @@ export class SeedActivosServicio {
                 n.includes('apple') || d.includes('apple') ||
                 n.includes('ploter') || d.includes('ploter') ||
                 n.includes('designjet') || d.includes('designjet') ||
-                n.includes('scaner') || d.includes('scaner') ||
-                n.includes('scanner') || d.includes('scanner') ||
-                n.includes('genius') || d.includes('genius') ||
                 n.includes('monitor') || d.includes('monitor') ||
                 n.includes('cpu') || d.includes('cpu') ||
                 n.includes('impresora') || d.includes('impresora') ||
                 n.includes('epson') || d.includes('epson') ||
                 n.includes('estabilizador') || d.includes('estabilizador') ||
-                n.includes('distanciometro') || d.includes('distanciometro') ||
-                n.includes('distanciómetro') || d.includes('distanciómetro') ||
                 n.includes('bosch') || d.includes('bosch')
             ) {
-                return 'Contenedor de Equipos de Computación';
+                return 'Equipos de Computación';
             }
-            if (
-                n.includes('mesa') || d.includes('mesa') ||
-                n.includes('escritorio') || d.includes('escritorio') ||
-                n.includes('silla') || d.includes('silla') ||
-                n.includes('vitrina') || d.includes('vitrina') ||
-                n.includes('estante') || d.includes('estante')
-            ) {
-                return 'Muebles y Estanterías';
-            }
-            return 'Caja de Varios';
+            return 'Otros';
         } else {
             if (
                 n.includes('taladro') || d.includes('taladro') ||
@@ -169,7 +190,7 @@ export class SeedActivosServicio {
                 n.includes('aeg') || d.includes('aeg') ||
                 n.includes('dewalt') || d.includes('dewalt')
             ) {
-                return 'Contenedor de Herramientas Eléctricas';
+                return 'Herramientas Eléctricas';
             }
             if (
                 n.includes('scaner') || d.includes('scaner') ||
@@ -188,7 +209,7 @@ export class SeedActivosServicio {
                 n.includes('micrometro') || d.includes('micrometro') ||
                 n.includes('micrómetro') || d.includes('micrómetro')
             ) {
-                return 'Contenedor de Equipos de Diagnóstico y Medición';
+                return 'Equipos de Diagnóstico y Medición';
             }
             if (
                 n.includes('oxiacetileno') || d.includes('oxiacetileno') ||
@@ -202,7 +223,7 @@ export class SeedActivosServicio {
                 n.includes('tecle') || d.includes('tecle') ||
                 n.includes('cilindro') || d.includes('cilindro')
             ) {
-                return 'Contenedor de Equipos Pesados y Gas';
+                return 'Equipos Pesados y Gas';
             }
             if (
                 n.includes('mascara') || d.includes('mascara') ||
@@ -213,7 +234,7 @@ export class SeedActivosServicio {
                 n.includes('casco') || d.includes('casco') ||
                 n.includes('extintor') || d.includes('extintor')
             ) {
-                return 'Contenedor de Equipos de Seguridad';
+                return 'Equipos de Seguridad';
             }
             if (
                 n.includes('computadora') || d.includes('computadora') ||
@@ -227,17 +248,9 @@ export class SeedActivosServicio {
                 n.includes('lg') || d.includes('lg') ||
                 n.includes('delux') || d.includes('delux')
             ) {
-                return 'Contenedor de Equipos de Computación';
+                return 'Equipos de Computación';
             }
-            if (
-                n.includes('mesa') || d.includes('mesa') ||
-                n.includes('escritorio') || d.includes('escritorio') ||
-                n.includes('silla') || d.includes('silla') ||
-                n.includes('estante') || d.includes('estante')
-            ) {
-                return 'Muebles y Estanterías';
-            }
-            return 'Caja de Varios';
+            return 'Otros';
         }
     }
 
@@ -635,25 +648,7 @@ export class SeedActivosServicio {
             const activosFijosData = this.cargarJson<{ titulo: string; activos: Array<{ codigo_inventario: string; codigo_unico?: string | null; descripcion: string; estado: string; ue: string; observacion?: string }> }>(`inventarios/${carpeta}/activos-fijos.json`);
             this.logger.log(`Cargando ${activosFijosData.activos.length} activos fijos para ${invConfig.nombre}...`);
 
-            const contenedoresDef = carpeta === 'gabinete-topografico' ? [
-                { nombre: 'Contenedor de Drones', ubicacion: 'Estante A' },
-                { nombre: 'Contenedor de GNSS', ubicacion: 'Estante B' },
-                { nombre: 'Contenedor de Estaciones Totales', ubicacion: 'Estante C' },
-                { nombre: 'Contenedor de Niveles', ubicacion: 'Estante D' },
-                { nombre: 'Contenedor de Brújulas y Eclímetros', ubicacion: 'Estante E' },
-                { nombre: 'Contenedor de Estereoscopios y Altimetros', ubicacion: 'Estante F' },
-                { nombre: 'Contenedor de Equipos de Computación', ubicacion: 'Mesa de Trabajo' },
-                { nombre: 'Muebles y Estanterías', ubicacion: 'Oficina' },
-                { nombre: 'Caja de Varios', ubicacion: 'Depósito General' },
-            ] : [
-                { nombre: 'Contenedor de Herramientas Eléctricas', ubicacion: 'Estante Metálico 1' },
-                { nombre: 'Contenedor de Equipos de Diagnóstico y Medición', ubicacion: 'Estante Metálico 2' },
-                { nombre: 'Contenedor de Equipos Pesados y Gas', ubicacion: 'Zona de Carga' },
-                { nombre: 'Contenedor de Equipos de Seguridad', ubicacion: 'Gabinete de Seguridad' },
-                { nombre: 'Contenedor de Equipos de Computación', ubicacion: 'Oficina de Control' },
-                { nombre: 'Muebles y Estanterías', ubicacion: 'Bodega' },
-                { nombre: 'Caja de Varios', ubicacion: 'Bodega Central' },
-            ];
+            const contenedoresDef = this.cargarJson<Array<{ nombre: string; ubicacion: string }>>(`inventarios/${carpeta}/contenedores.json`);
 
             const contenedoresMap = new Map<string, ContenedorActivo>();
             const contenedoresToSave: ContenedorActivo[] = [];
@@ -746,6 +741,8 @@ export class SeedActivosServicio {
                 const nombreBaseRaw = rowEnriquecido?.['Nombre del Activo'] ?? itemSeed.descripcion;
                 const normalizado = this.normalizarNombreActivo(nombreBaseRaw);
                 const rawDesc = rowEnriquecido?.['Descripción del Activo'] ?? itemSeed.descripcion;
+
+                const nombreContenedor = this.clasificarContenedor(normalizado.nombre, rawDesc, carpeta);
 
                 const activo = existingActivosMap.get(normalizado.nombre)!;
 

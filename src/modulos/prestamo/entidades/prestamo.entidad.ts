@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, JoinColum
 import { createHmac } from 'crypto';
 import { EstudianteEntidad } from '@/modulos/estudiante/entidades/estudiante.entidad';
 import { ItemActivoFijo } from '@/modulos/activo/entidades/item-activo-fijo.entidad';
+import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
 import { Usuario } from '@/modulos/usuario/entidades/usuario.entidad';
 import { HistorialPrestamoEntidad } from './historial-prestamo.entidad';
 import { InventarioEntidad } from '@/modulos/inventario/entidades/inventario.entidad';
@@ -25,6 +26,10 @@ export class PrestamoEntidad {
   @ManyToOne(() => ItemActivoFijo, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'id_item_activo' })
   itemActivo?: ItemActivoFijo | null;
+
+  @ManyToOne(() => ContenedorActivo, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'id_contenedor' })
+  contenedor?: ContenedorActivo | null;
 
   @ManyToOne(() => InventarioEntidad, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'id_inventario' })

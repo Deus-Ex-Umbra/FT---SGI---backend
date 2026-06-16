@@ -6,6 +6,7 @@ import { RolesGuardia } from '@/modulos/autenticacion/guardias/roles.guardia';
 import { ConfiguracionServicio } from './configuracion.servicio';
 import { ActualizarConfiguracionIADto } from './dto/actualizar-configuracion-ia.dto';
 import { ActualizarConfiguracionRegistroEstudianteDto } from './dto/actualizar-configuracion-registro-estudiante.dto';
+import { ActualizarConfiguracionRegistroDocenteDto } from './dto/actualizar-configuracion-registro-docente.dto';
 
 @ApiTags('Configuracion')
 @ApiBearerAuth('JWT-auth')
@@ -44,5 +45,21 @@ export class ConfiguracionControlador {
   @ApiOperation({ summary: 'Habilitar o deshabilitar el registro público de estudiantes' })
   async actualizarRegistroEstudiante(@Body() dto: ActualizarConfiguracionRegistroEstudianteDto) {
     return await this.servicio.actualizarRegistroEstudiante(dto.habilitado);
+  }
+
+  @Get('registro-docente')
+  @UseGuards(RolesGuardia)
+  @Roles('administrador')
+  @ApiOperation({ summary: 'Obtener estado de habilitación del registro de docentes' })
+  async obtenerRegistroDocente() {
+    return await this.servicio.obtenerRegistroDocente();
+  }
+
+  @Put('registro-docente')
+  @UseGuards(RolesGuardia)
+  @Roles('administrador')
+  @ApiOperation({ summary: 'Habilitar o deshabilitar el registro público de docentes' })
+  async actualizarRegistroDocente(@Body() dto: ActualizarConfiguracionRegistroDocenteDto) {
+    return await this.servicio.actualizarRegistroDocente(dto.habilitado);
   }
 }

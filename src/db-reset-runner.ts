@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
-const DB_NAMES_BLOQUEADOS = new Set(['postgres', 'template0', 'template1']);
+const DB_NAMES_BLOQUEADOS = new Set(['template0', 'template1']); // postgres is allowed because Supabase defaults to it
 
 async function main() {
   process.env.IGNORE_ENV_FILE = process.env.IGNORE_ENV_FILE ?? 'false';

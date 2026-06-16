@@ -11,6 +11,7 @@ export interface ContenedorCompartido {
     descripcion: string;
     idActivo?: number;
     idMaterial?: number;
+    visible: boolean;
 }
 
 type UsuarioAutenticado = {
@@ -94,11 +95,12 @@ export class ContenedorCompartidoServicio {
             nombre: contenedor.nombre,
             descripcion: contenedor.ubicacion,
             idActivo: contenedor.id,
+            visible: contenedor.visible,
         })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     }
 
     async crear(
-        datos: { nombre: string; descripcion: string; idInventario?: number },
+        datos: { nombre: string; descripcion: string; idInventario?: number; visible?: boolean },
         usuario: UsuarioAutenticado,
     ): Promise<ContenedorCompartido> {
         const contexto = await this.resolverContextoInventario(usuario);
@@ -140,8 +142,10 @@ export class ContenedorCompartidoServicio {
 
             const existenteActivo = await consultaActivo.getOne();
 
+            const visible = datos.visible ?? true;
+
             const contenedorActivo = existenteActivo ?? await activoRepositorio.save(
-                activoRepositorio.create({ nombre, ubicacion: descripcion, inventario }),
+                activoRepositorio.create({ nombre, ubicacion: descripcion, inventario, visible }),
             );
 
             return {
@@ -149,12 +153,13 @@ export class ContenedorCompartidoServicio {
                 nombre,
                 descripcion,
                 idActivo: contenedorActivo.id,
+                visible: contenedorActivo.visible,
             };
         });
     }
 
     async editar(
-        datos: { idActivo?: number; idMaterial?: number; nombre: string; descripcion: string; idInventario?: number },
+        datos: { idActivo?: number; idMaterial?: number; nombre: string; descripcion: string; idInventario?: number; visible?: boolean },
         usuario: UsuarioAutenticado,
     ): Promise<ContenedorCompartido> {
         const contexto = await this.resolverContextoInventario(usuario);
@@ -191,6 +196,9 @@ export class ContenedorCompartidoServicio {
 
             contenedorActivo.nombre = nombre;
             contenedorActivo.ubicacion = descripcion;
+            if (datos.visible !== undefined) {
+                contenedorActivo.visible = datos.visible;
+            }
 
             if (contexto.esAdmin && datos.idInventario !== undefined) {
                 contenedorActivo.inventario = await this.obtenerInventarioPorId(datos.idInventario ?? null);
@@ -203,6 +211,7 @@ export class ContenedorCompartidoServicio {
                 nombre,
                 descripcion,
                 idActivo: contenedorActivo.id,
+                visible: contenedorActivo.visible,
             };
         });
     }

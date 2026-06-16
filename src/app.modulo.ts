@@ -28,6 +28,7 @@ import { GeminiModulo } from './modulos/gemini/gemini.modulo';
 import { ReportesModulo } from './modulos/reportes/reportes.modulo';
 import { ConfiguracionIAEntidad } from './modulos/configuracion/entidades/configuracion-ia.entidad';
 import { ConfiguracionRegistroEstudianteEntidad } from './modulos/configuracion/entidades/configuracion-registro-estudiante.entidad';
+import { ConfiguracionRegistroDocenteEntidad } from './modulos/configuracion/entidades/configuracion-registro-docente.entidad';
 import { ReporteEntidad } from './modulos/reportes/entidades/reporte.entidad';
 import { DocenciaModulo } from './modulos/docencia/docencia.modulo';
 import { GrupoMateriaDocenteEntidad } from './modulos/docencia/entidades/grupo-materia-docente.entidad';
@@ -68,6 +69,7 @@ const entidadesTypeOrm = [
   MateriaEntidad,
   ConfiguracionIAEntidad,
   ConfiguracionRegistroEstudianteEntidad,
+  ConfiguracionRegistroDocenteEntidad,
   ReporteEntidad,
   GrupoMateriaDocenteEntidad,
   SolicitudMaterialDocenteEntidad,
@@ -190,6 +192,7 @@ const parsePgUrl = (url: string) => {
       InventarioEntidad,
       ConfiguracionIAEntidad,
       ConfiguracionRegistroEstudianteEntidad,
+      ConfiguracionRegistroDocenteEntidad,
       ContenedorActivo,
       ActivoFijo,
       ItemActivoFijo,

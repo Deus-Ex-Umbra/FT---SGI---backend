@@ -204,6 +204,46 @@ export class EnlaceFirmadoServicio {
     return { ok: true, deshabilitados: afectados };
   }
 
+  async obtenerInvitacionRegistroDocenteActiva() {
+    const enlace = await this.repoEnlaces.findOne({
+      where: {
+        tipo: 'registro_docente',
+        permiso: 'registro_docente_publico',
+        habilitado: true,
+        expiraEn: MoreThan(new Date()),
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    return enlace ? this.serializar(enlace) : null;
+  }
+
+  async habilitarInvitacionRegistroDocente(creadoPorUsuarioId?: number) {
+    await this.deshabilitarEnlacesActivos({
+      tipo: 'registro_docente',
+      permiso: 'registro_docente_publico',
+      recursoId: null,
+    });
+
+    return await this.crearInvitacion({
+      tipo: 'registro_docente',
+      permiso: 'registro_docente_publico',
+      creadoPorUsuarioId,
+      ttlMs: this.obtenerTtlMsRegistroEstudiante(), // Reuse student TTL or configuration
+      recursoId: null,
+    });
+  }
+
+  async deshabilitarInvitacionRegistroDocente() {
+    const afectados = await this.deshabilitarEnlacesActivos({
+      tipo: 'registro_docente',
+      permiso: 'registro_docente_publico',
+      recursoId: null,
+    });
+
+    return { ok: true, deshabilitados: afectados };
+  }
+
   async obtenerInvitacionInscripcionMateriaActiva(materiaId: string) {
     const enlace = await this.repoEnlaces.findOne({
       where: {

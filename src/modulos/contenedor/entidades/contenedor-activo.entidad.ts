@@ -13,6 +13,10 @@ export class ContenedorActivo {
     @Column({ length: 150 })
     ubicacion!: string;
 
+    @Column({ type: 'boolean', default: true })
+    visible!: boolean;
+
+
     @CreateDateColumn({ type: 'timestamp', name: 'created_at' })
     created_at!: Date;
 

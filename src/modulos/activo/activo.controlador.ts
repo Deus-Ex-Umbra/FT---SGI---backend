@@ -65,6 +65,13 @@ export class ActivoControlador {
         return this.servicio.obtenerContenedores(req.user);
     }
 
+    @Get('contenedores/inventario/:id')
+    obtenerContenedoresPorInventario(
+        @Param('id', ParseIntPipe) id: number,
+    ) {
+        return this.servicio.obtenerContenedoresPorInventario(id);
+    }
+
     @Post('contenedores')
     crearContenedor(
         @Request() req: { user: UsuarioConPermisos },

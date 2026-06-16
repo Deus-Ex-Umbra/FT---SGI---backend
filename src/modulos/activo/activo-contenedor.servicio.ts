@@ -78,8 +78,15 @@ export class ActivoContenedorServicio {
         return consulta.getMany();
     }
 
+    async obtenerContenedoresPorInventario(idInventario: number): Promise<ContenedorActivo[]> {
+        return this.contenedorActivoRepositorio.find({
+            where: { inventario: { id: idInventario } },
+            order: { id: 'ASC' },
+        });
+    }
+
     async crearContenedor(
-        datos: { nombre: string; ubicacion: string; idInventario?: number },
+        datos: { nombre: string; ubicacion: string; idInventario?: number; visible?: boolean },
         usuario: UsuarioAutenticado,
     ): Promise<ContenedorActivo> {
         const contexto = await this.resolverContextoInventario(usuario);
@@ -117,13 +124,15 @@ export class ActivoContenedorServicio {
         const existente = await existenteConsulta.getOne();
         if (existente) return existente;
 
-        const contenedor = this.contenedorActivoRepositorio.create({ nombre, ubicacion, inventario });
+        const visible = datos.visible ?? true;
+
+        const contenedor = this.contenedorActivoRepositorio.create({ nombre, ubicacion, inventario, visible });
         return this.contenedorActivoRepositorio.save(contenedor);
     }
 
     async editarContenedor(
         id: number,
-        datos: Partial<{ nombre: string; ubicacion: string; idInventario: number }>,
+        datos: Partial<{ nombre: string; ubicacion: string; idInventario: number; visible: boolean }>,
         usuario: UsuarioAutenticado,
     ): Promise<ContenedorActivo> {
         const contexto = await this.resolverContextoInventario(usuario);
@@ -147,6 +156,9 @@ export class ActivoContenedorServicio {
         }
         if (typeof datos.ubicacion === 'string' && datos.ubicacion.trim()) {
             contenedor.ubicacion = datos.ubicacion.trim();
+        }
+        if (datos.visible !== undefined) {
+            contenedor.visible = datos.visible;
         }
         if (contexto.esAdmin && datos.idInventario !== undefined) {
             contenedor.inventario = await this.obtenerInventarioPorId(datos.idInventario ?? null);

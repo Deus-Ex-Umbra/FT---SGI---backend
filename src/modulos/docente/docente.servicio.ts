@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DocenteEntidad } from './entidades/docente.entidad';
 import { UsuarioServicio } from '@/modulos/usuario/usuario.servicio';
 import { CrearDocenteDto } from './dto/crear-docente.dto';
+import { EncargadoInventarioEntidad } from '@/modulos/encargado-inventario/entidades/encargado-inventario.entidad';
 
 export interface DocentePublico {
     id: number;
@@ -16,6 +17,7 @@ export interface DocentePublico {
     materiasAsignadas: string[];
     fechaNacimiento: string;
     carrerasIds?: number[];
+    estadoAprobacion: 'pendiente' | 'aprobado' | 'rechazado';
 }
 
 @Injectable()
@@ -28,7 +30,7 @@ export class DocenteServicio {
 
     async listarDocentes(): Promise<DocentePublico[]> {
         const docentes = await this.repositorioDocente.find({
-            where: { usuario: { rol: 'docente' } },
+            where: { usuario: { rol: 'docente' }, estadoAprobacion: 'aprobado' },
             relations: ['usuario', 'carreras'],
             order: { id: 'ASC' },
         });
@@ -48,10 +50,11 @@ export class DocenteServicio {
                     : [],
                 fechaNacimiento: d.fechaNacimiento ?? '',
                 carrerasIds: (d.carreras ?? []).map((c) => c.id),
+                estadoAprobacion: d.estadoAprobacion,
             }));
     }
 
-    async crearDocente(dto: CrearDocenteDto): Promise<DocentePublico> {
+    async crearDocente(dto: CrearDocenteDto, aprobadoPorDefecto: boolean = true): Promise<DocentePublico> {
         const correo = String(dto.correo ?? '').trim().toLowerCase();
         const ci = String(dto.ci ?? '').trim();
         const nombre = String(dto.nombre ?? '').trim();
@@ -85,6 +88,7 @@ export class DocenteServicio {
             correo,
             contrasena: contrasena || this.usuarioServicio.construirContrasenaTemporalConFecha('docente', fechaNacimiento),
             rol: 'docente',
+            estado: aprobadoPorDefecto,
         });
 
         const docente = await this.repositorioDocente.save({
@@ -96,6 +100,7 @@ export class DocenteServicio {
             materiasAsignadas: [],
             fechaNacimiento,
             carreras: dto.carrerasIds ? dto.carrerasIds.map(id => ({ id } as any)) : [],
+            estadoAprobacion: aprobadoPorDefecto ? 'aprobado' : 'pendiente',
         });
 
         return {
@@ -109,6 +114,7 @@ export class DocenteServicio {
             materiasAsignadas: [],
             fechaNacimiento: fechaNacimiento ?? '',
             carrerasIds: dto.carrerasIds ?? [],
+            estadoAprobacion: docente.estadoAprobacion,
         };
     }
 
@@ -199,6 +205,7 @@ export class DocenteServicio {
             materiasAsignadas: Array.isArray(guardado.materiasAsignadas) ? guardado.materiasAsignadas : [],
             fechaNacimiento: guardado.fechaNacimiento ?? '',
             carrerasIds: (guardado.carreras ?? []).map(c => c.id),
+            estadoAprobacion: guardado.estadoAprobacion,
         };
     }
 
@@ -209,5 +216,123 @@ export class DocenteServicio {
         });
         if (!docente) throw new NotFoundException('No se encontró el docente.');
         await this.repositorioDocente.remove(docente);
+    }
+
+    async listarSolicitudesPendientes(usuarioActual: { id: number; rol: string }): Promise<DocentePublico[]> {
+        const qb = this.repositorioDocente.createQueryBuilder('d')
+            .leftJoinAndSelect('d.usuario', 'usuario')
+            .leftJoinAndSelect('d.carreras', 'carreras')
+            .where('d.estadoAprobacion = :estado', { estado: 'pendiente' });
+
+        if (usuarioActual.rol === 'encargado_inventario') {
+            const encargado = await this.repositorioDocente.manager.getRepository(EncargadoInventarioEntidad).findOne({
+                where: { usuario: { id: usuarioActual.id } },
+                relations: ['inventario'],
+            });
+
+            if (!encargado || !encargado.inventario) {
+                return [];
+            }
+            const inventarioId = encargado.inventario.id;
+
+            qb.leftJoin('carreras.inventarios', 'inv')
+              .andWhere('inv.id = :inventarioId', { inventarioId });
+        }
+
+        const docentes = await qb.orderBy('d.id', 'ASC').getMany();
+
+        return docentes
+            .filter((d) => d.usuario && d.ci && d.nombre && d.apellido)
+            .map((d) => ({
+                id: d.usuario!.id,
+                rol: 'docente' as const,
+                correo: d.usuario!.correo ?? '',
+                ci: d.ci ?? '',
+                codigo: d.codigo ?? '',
+                nombre: d.nombre ?? '',
+                apellido: d.apellido ?? '',
+                materiasAsignadas: Array.isArray(d.materiasAsignadas)
+                    ? d.materiasAsignadas.map((c) => String(c).trim().toUpperCase()).filter(Boolean)
+                    : [],
+                fechaNacimiento: d.fechaNacimiento ?? '',
+                carrerasIds: (d.carreras ?? []).map((c) => c.id),
+                estadoAprobacion: d.estadoAprobacion,
+            }));
+    }
+
+    async aprobarDocente(id: number, usuarioActual: { id: number; rol: string }): Promise<void> {
+        const docente = await this.repositorioDocente.findOne({
+            where: { usuario: { id } },
+            relations: ['usuario', 'carreras', 'carreras.inventarios'],
+        });
+        if (!docente) throw new NotFoundException('Docente no encontrado.');
+        if (docente.estadoAprobacion !== 'pendiente') {
+            throw new BadRequestException('El docente no tiene una solicitud pendiente.');
+        }
+
+        if (usuarioActual.rol === 'encargado_inventario') {
+            const encargado = await this.repositorioDocente.manager.getRepository(EncargadoInventarioEntidad).findOne({
+                where: { usuario: { id: usuarioActual.id } },
+                relations: ['inventario'],
+            });
+            if (!encargado || !encargado.inventario) {
+                throw new ForbiddenException('No tienes un inventario asignado.');
+            }
+            const inventarioId = encargado.inventario.id;
+
+            const tieneInventarioAsignado = (docente.carreras ?? []).some(c => 
+                c.inventarios?.some(i => i.id === inventarioId)
+            );
+
+            if (!tieneInventarioAsignado) {
+                throw new ForbiddenException('No tienes permisos para aprobar a este docente.');
+            }
+        }
+
+        docente.estadoAprobacion = 'aprobado';
+        await this.repositorioDocente.save(docente);
+
+        if (docente.usuario) {
+            docente.usuario.estado = true;
+            await this.repositorioDocente.manager.save(docente.usuario);
+        }
+    }
+
+    async rechazarDocente(id: number, usuarioActual: { id: number; rol: string }): Promise<void> {
+        const docente = await this.repositorioDocente.findOne({
+            where: { usuario: { id } },
+            relations: ['usuario', 'carreras', 'carreras.inventarios'],
+        });
+        if (!docente) throw new NotFoundException('Docente no encontrado.');
+        if (docente.estadoAprobacion !== 'pendiente') {
+            throw new BadRequestException('El docente no tiene una solicitud pendiente.');
+        }
+
+        if (usuarioActual.rol === 'encargado_inventario') {
+            const encargado = await this.repositorioDocente.manager.getRepository(EncargadoInventarioEntidad).findOne({
+                where: { usuario: { id: usuarioActual.id } },
+                relations: ['inventario'],
+            });
+            if (!encargado || !encargado.inventario) {
+                throw new ForbiddenException('No tienes un inventario asignado.');
+            }
+            const inventarioId = encargado.inventario.id;
+
+            const tieneInventarioAsignado = (docente.carreras ?? []).some(c => 
+                c.inventarios?.some(i => i.id === inventarioId)
+            );
+
+            if (!tieneInventarioAsignado) {
+                throw new ForbiddenException('No tienes permisos para rechazar a este docente.');
+            }
+        }
+
+        docente.estadoAprobacion = 'rechazado';
+        await this.repositorioDocente.save(docente);
+
+        if (docente.usuario) {
+            docente.usuario.estado = false;
+            await this.repositorioDocente.manager.save(docente.usuario);
+        }
     }
 }

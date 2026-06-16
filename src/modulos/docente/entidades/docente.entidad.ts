@@ -32,6 +32,9 @@ export class DocenteEntidad {
   @JoinColumn({ name: 'id_usuario' })
   usuario?: Usuario | null;
 
+  @Column({ name: 'estado_aprobacion', type: 'varchar', length: 20, default: 'aprobado' })
+  estadoAprobacion!: 'aprobado' | 'pendiente' | 'rechazado';
+
   @ManyToMany(() => CarreraEntidad, (carrera) => carrera.docentes)
   @JoinTable({
     name: 'docentes_carreras',

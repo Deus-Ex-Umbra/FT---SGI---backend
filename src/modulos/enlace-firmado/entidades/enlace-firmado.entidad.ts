@@ -1,10 +1,10 @@
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { Usuario } from '@/modulos/usuario/entidades/usuario.entidad';
 
-export const TIPOS_ENLACE_FIRMADO = ['registro_estudiante', 'inscripcion_materia'] as const;
+export const TIPOS_ENLACE_FIRMADO = ['registro_estudiante', 'registro_docente', 'inscripcion_materia'] as const;
 export type TipoEnlaceFirmado = (typeof TIPOS_ENLACE_FIRMADO)[number];
 
-export const PERMISOS_ENLACE_FIRMADO = ['registro_estudiante_publico', 'inscripcion_materia_docente'] as const;
+export const PERMISOS_ENLACE_FIRMADO = ['registro_estudiante_publico', 'registro_docente_publico', 'inscripcion_materia_docente'] as const;
 export type PermisoEnlaceFirmado = (typeof PERMISOS_ENLACE_FIRMADO)[number];
 
 @Entity('enlaces_firmados')

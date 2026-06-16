@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Brackets } from 'typeorm';
+import { Repository, Brackets, IsNull } from 'typeorm';
 import { PrestamoEntidad } from './entidades/prestamo.entidad';
 import { CanastaPrestamoItemEntidad } from './entidades/canasta-prestamo-item.entidad';
 import { EstudianteEntidad } from '@/modulos/estudiante/entidades/estudiante.entidad';
 import { PrestamoUtilServicio } from './prestamo-util.servicio';
+import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
 
 @Injectable()
 export class PrestamoCanastaServicio {
@@ -12,6 +13,8 @@ export class PrestamoCanastaServicio {
     private readonly util: PrestamoUtilServicio,
     @InjectRepository(CanastaPrestamoItemEntidad)
     private readonly canastaItemsRepo: Repository<CanastaPrestamoItemEntidad>,
+    @InjectRepository(ContenedorActivo)
+    private readonly contenedoresRepo: Repository<ContenedorActivo>,
   ) {}
 
   private async resolverEstudiantesPorCarnets(carnetsEntrada: string[]): Promise<EstudianteEntidad[]> {
@@ -88,7 +91,7 @@ export class PrestamoCanastaServicio {
     if (!grupoCanasta?.trim()) return [];
     return this.canastaItemsRepo.find({
       where: { grupoCanasta: grupoCanasta.trim() },
-      relations: ['itemActivo', 'itemActivo.activo'],
+      relations: ['itemActivo', 'itemActivo.activo', 'contenedor'],
       order: { id: 'ASC' },
     });
   }
@@ -99,7 +102,7 @@ export class PrestamoCanastaServicio {
     if (grupos.length === 0) return mapa;
     const detalles = await this.canastaItemsRepo.find({
       where: grupos.map((grupoCanasta) => ({ grupoCanasta })),
-      relations: ['itemActivo', 'itemActivo.activo'],
+      relations: ['itemActivo', 'itemActivo.activo', 'contenedor'],
       order: { id: 'ASC' },
     });
     for (const d of detalles) {
@@ -114,14 +117,23 @@ export class PrestamoCanastaServicio {
     const vistos = new Set<string>();
     const detalles: CanastaPrestamoItemEntidad[] = [];
     for (const p of prestamos) {
-      const idH = String(p.itemActivo?.id ?? p.codigoHerramienta ?? '').trim();
-      if (!idH || vistos.has(idH) || !p.itemActivo) continue;
-      vistos.add(idH);
-      detalles.push(this.canastaItemsRepo.create({
-        grupoCanasta: p.grupoCanasta ?? `IND-${p.id}`,
-        itemActivo: p.itemActivo,
-        registrado: true,
-      }));
+      if (p.itemActivo) {
+        const idH = String(p.itemActivo.id).trim();
+        if (vistos.has(`item-${idH}`)) continue;
+        vistos.add(`item-${idH}`);
+        detalles.push(this.canastaItemsRepo.create({
+          grupoCanasta: p.grupoCanasta ?? `IND-${p.id}`,
+          itemActivo: p.itemActivo,
+          registrado: p.estado === 'despachado' || p.estado === 'activo' || p.estado === 'devuelto' || p.estado === 'devuelto_fuera_de_fecha_limite',
+        }));
+      } else if (p.contenedor) {
+        detalles.push(this.canastaItemsRepo.create({
+          grupoCanasta: p.grupoCanasta ?? `IND-${p.id}`,
+          itemActivo: null,
+          contenedor: p.contenedor,
+          registrado: p.estado === 'despachado' || p.estado === 'activo' || p.estado === 'devuelto' || p.estado === 'devuelto_fuera_de_fecha_limite',
+        }));
+      }
     }
     return detalles;
   }
@@ -144,20 +156,20 @@ export class PrestamoCanastaServicio {
       if (!Number.isInteger(id) || id <= 0) throw new BadRequestException('Identificador de canasta individual no válido.');
       const unico = await this.util.prestamosRepo.findOne({
         where: { id },
-        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo'],
+        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor'],
       });
       if (!unico || unico.deletedAt) throw new NotFoundException('Canasta no encontrada.');
       return [unico];
     }
     let items = await this.util.prestamosRepo.find({
       where: { grupoCanasta: limpio },
-      relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo'],
+      relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor'],
       order: { id: 'ASC' },
     });
     if (items.length === 0) {
       items = await this.util.prestamosRepo.find({
         where: { codigo: limpio },
-        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo'],
+        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor'],
         order: { id: 'ASC' },
       });
     }
@@ -210,10 +222,30 @@ export class PrestamoCanastaServicio {
                 : 'devuelto';
 
     const detalles = detallesCanasta.length > 0 ? detallesCanasta : this.construirDetallesCanastaFallback(prestamos);
+    const prestamosAsignados = new Set<number>();
     const cosas = detalles.map((d) => {
+      if (!d.itemActivo && d.contenedor) {
+        const pr = prestamos.find((p) => p.codigoHerramienta === null && p.contenedor?.id === d.contenedor?.id && !prestamosAsignados.has(p.id));
+        if (pr) {
+          prestamosAsignados.add(pr.id);
+        }
+        return {
+          idPrestamo: pr?.id ?? null,
+          idHerramienta: null,
+          codigoInventario: null,
+          idContenedor: d.contenedor.id,
+          nombreContenedor: d.contenedor.nombre,
+          nombre: `${d.contenedor.nombre} (Solicitado)`,
+          registrado: d.registrado === true,
+        };
+      }
       const idH = String(d.itemActivo?.id ?? '').trim();
-      const pr = prestamos.find((p) => p.codigoHerramienta === idH);
+      const pr = prestamos.find((p) => p.codigoHerramienta === idH && !prestamosAsignados.has(p.id));
+      if (pr) {
+        prestamosAsignados.add(pr.id);
+      }
       return {
+        idPrestamo: pr?.id ?? null,
         idHerramienta: idH || (pr?.codigoHerramienta ?? ''),
         codigoInventario: (d.itemActivo as any)?.codigo_inventario ?? (pr?.itemActivo as any)?.codigo_inventario ?? pr?.codigoHerramienta ?? idH,
         nombre: d.itemActivo?.activo?.nombre ?? pr?.itemActivo?.activo?.nombre ?? 'Activo',
@@ -300,6 +332,7 @@ export class PrestamoCanastaServicio {
       .leftJoinAndSelect('p.itemActivo', 'itemActivo')
       .leftJoinAndSelect('itemActivo.activo', 'activo')
       .leftJoinAndSelect('activo.inventario', 'inventario')
+      .leftJoinAndSelect('p.contenedor', 'contenedor')
       .orderBy('p.fecha_prestamo', 'DESC')
       .addOrderBy('p.id', 'DESC');
 
@@ -426,8 +459,15 @@ export class PrestamoCanastaServicio {
         ? datos.items
         : (datos.equipos ?? []).map((idHerramienta: string) => ({ idHerramienta, registrado: true })),
     );
+    const contenedoresInput = datos.contenedores ?? [];
     const consumibles = datos.consumibles ?? [];
-    if (itemsCanasta.length === 0 && consumibles.length === 0) throw new BadRequestException('Canasta vacía.');
+    if (itemsCanasta.length === 0 && contenedoresInput.length === 0 && consumibles.length === 0) throw new BadRequestException('Canasta vacía.');
+
+    const idsContenedores = contenedoresInput.map((c: any) => Number(c.idContenedor)).filter(Boolean);
+    const contenedoresDb = idsContenedores.length > 0
+      ? await this.contenedoresRepo.find({ where: idsContenedores.map((id: number) => ({ id })), relations: ['inventario'] })
+      : [];
+    const contenedoresMap = new Map(contenedoresDb.map(c => [c.id, c]));
 
     const estadoInicial = ejecutor?.rol === 'docente' ? 'solicitado' : 'despachado';
     const itemsRegistrados = itemsCanasta.filter((item) => item.registrado);
@@ -442,6 +482,18 @@ export class PrestamoCanastaServicio {
     for (const itemCanasta of itemsCanasta) {
       const itemActivo = await this.util.obtenerItemActivo(itemCanasta.idHerramienta);
       detallesCanasta.push(this.canastaItemsRepo.create({ grupoCanasta, itemActivo, registrado: itemCanasta.registrado }));
+    }
+    for (const cont of contenedoresInput) {
+      const contenedor = contenedoresMap.get(Number(cont.idContenedor));
+      if (!contenedor) throw new NotFoundException(`Contenedor ${cont.idContenedor} no encontrado.`);
+      for (let i = 0; i < Number(cont.cantidad); i++) {
+        detallesCanasta.push(this.canastaItemsRepo.create({
+          grupoCanasta,
+          itemActivo: null,
+          contenedor,
+          registrado: false,
+        }));
+      }
     }
     if (detallesCanasta.length > 0) {
       await this.canastaItemsRepo.save(detallesCanasta);
@@ -479,6 +531,7 @@ export class PrestamoCanastaServicio {
       ? datos.carnetsRetenidos.includes(estudiante.carnet)
       : estadoInicial === 'despachado';
 
+    // 1. Create loans for specific items
     if (itemsRegistrados.length > 0) {
       for (const itemCanasta of itemsRegistrados) {
         const itemActivo = await this.util.obtenerItemActivo(itemCanasta.idHerramienta);
@@ -520,7 +573,51 @@ export class PrestamoCanastaServicio {
           await this.util.registrarCambioHistorial(completo, 'creacion_solicitud', completo.estado, estadoInicial === 'solicitado' ? 'Canasta solicitada.' : 'Préstamo creado como parte de canasta.', ejecutor);
         }
       }
-    } else {
+    }
+
+    // 2. Create loans for generic containers
+    for (const cont of contenedoresInput) {
+      const contenedor = contenedoresMap.get(Number(cont.idContenedor));
+      if (!contenedor) continue;
+      for (let i = 0; i < Number(cont.cantidad); i++) {
+        const prestamo = this.util.prestamosRepo.create({
+          estudiante,
+          docente,
+          codigoHerramienta: null,
+          grupoCanasta,
+          fechaPrestamo,
+          fechaDevolucion,
+          estado: estadoInicial,
+          observaciones: datos.observaciones?.trim() || 'Canasta de prestamo (Contenedor)',
+          itemActivo: null,
+          contenedor,
+          codigo: codigoCanasta,
+          consumibles: salidasConsumibles.length > 0 ? salidasConsumibles : null,
+          carnetRetenido: carnetLiderRetenido,
+          inventario: inventarioSolicitadoId ? { id: inventarioSolicitadoId } : (contenedor?.inventario ?? { id: 1 } as any),
+        });
+
+        const guardado = await this.util.prestamosRepo.save(prestamo);
+        const completo = await this.util.prestamosRepo.findOne({ where: { id: guardado.id }, relations: ['estudiante', 'docente', 'contenedor'] });
+        if (completo) {
+          prestamosCreados.push({
+            id: completo.id,
+            carnetEstudiante: completo.estudiante?.carnet,
+            idHerramienta: null,
+            idContenedor: completo.contenedor?.id,
+            nombreContenedor: completo.contenedor?.nombre,
+            fechaPrestamo: completo.fechaPrestamo,
+            fechaDevolucion: completo.fechaDevolucion,
+            estado: completo.estado,
+            observaciones: completo.observaciones,
+          });
+          await this.util.registrarCambioHistorial(completo, 'creacion_solicitud', completo.estado, 'Canasta solicitada (contenedor).', ejecutor);
+        }
+      }
+    }
+
+    // 3. Fallback for only consumibles
+    if (itemsRegistrados.length === 0 && contenedoresInput.length === 0) {
       const prestamo = this.util.prestamosRepo.create({
         estudiante,
         docente,
@@ -557,6 +654,7 @@ export class PrestamoCanastaServicio {
     const grupoCanasta = prestamos[0].grupoCanasta ?? null;
     const estudiantesPrevios = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
     const idsPrevios = estudiantesPrevios.map((e) => e.id);
+    const inventarioSolicitadoId = datos.idInventario ? Number(datos.idInventario) : (prestamos[0].inventario?.id ?? null);
 
     let estudiantesDestino = estudiantesPrevios;
     if (Array.isArray(datos.carnetsEstudiantes) && datos.carnetsEstudiantes.length > 0) {
@@ -796,6 +894,115 @@ export class PrestamoCanastaServicio {
           await this.util.prestamosRepo.save(nuevoPrestamoNulo);
         }
       }
+
+      if (Array.isArray(datos.contenedores)) {
+        const contenedoresInput = datos.contenedores;
+        const idsContenedores = contenedoresInput.map((c: any) => Number(c.idContenedor)).filter(Boolean);
+        const contenedoresDb = idsContenedores.length > 0
+          ? await this.contenedoresRepo.find({ where: idsContenedores.map((id: number) => ({ id })), relations: ['inventario'] })
+          : [];
+        const contenedoresMap = new Map(contenedoresDb.map(c => [c.id, c]));
+
+        const detallesCanastaActuales = await this.canastaItemsRepo.find({
+          where: { grupoCanasta },
+          relations: ['contenedor', 'itemActivo'],
+        });
+        const containerItemsActuales = detallesCanastaActuales.filter(d => d.itemActivo === null && d.contenedor !== null);
+
+        const prestamosActuales = await this.util.prestamosRepo.find({
+          where: { grupoCanasta },
+          relations: ['contenedor', 'itemActivo', 'estudiante', 'docente'],
+        });
+        const prestamosContenedorActuales = prestamosActuales.filter(p => p.codigoHerramienta === null && p.contenedor !== null);
+
+        const itemsPorContenedor = new Map<number, CanastaPrestamoItemEntidad[]>();
+        for (const d of containerItemsActuales) {
+          const cid = d.contenedor!.id;
+          const list = itemsPorContenedor.get(cid) ?? [];
+          list.push(d);
+          itemsPorContenedor.set(cid, list);
+        }
+
+        const prestamosPorContenedor = new Map<number, PrestamoEntidad[]>();
+        for (const p of prestamosContenedorActuales) {
+          const cid = p.contenedor!.id;
+          const list = prestamosPorContenedor.get(cid) ?? [];
+          list.push(p);
+          prestamosPorContenedor.set(cid, list);
+        }
+
+        const processedContIds = new Set<number>();
+        for (const cont of contenedoresInput) {
+          const cid = Number(cont.idContenedor);
+          if (!cid) continue;
+          processedContIds.add(cid);
+
+          const targetQty = Number(cont.cantidad) || 0;
+          const currentItems = itemsPorContenedor.get(cid) ?? [];
+          const currentPrestamos = prestamosPorContenedor.get(cid) ?? [];
+
+          const currentQty = currentItems.length;
+
+          if (targetQty > currentQty) {
+            const diff = targetQty - currentQty;
+            const contenedor = contenedoresMap.get(cid);
+            if (!contenedor) throw new NotFoundException(`Contenedor ${cid} no encontrado.`);
+
+            for (let i = 0; i < diff; i++) {
+              const nuevoItem = this.canastaItemsRepo.create({
+                grupoCanasta,
+                itemActivo: null,
+                contenedor,
+                registrado: false,
+              });
+              await this.canastaItemsRepo.save(nuevoItem);
+
+              const nuevoPrestamo = this.util.prestamosRepo.create({
+                estudiante: estudianteDestino,
+                docente: docenteDestino,
+                codigoHerramienta: null,
+                grupoCanasta,
+                fechaPrestamo: fechaPrestamoDestino,
+                fechaDevolucion: fechaDevolucionDestino,
+                estado: this.util.estadoCalculado(datos.estado ?? 'solicitado', fechaDevolucionDestino),
+                observaciones: observacionesDestino,
+                itemActivo: null,
+                contenedor,
+                codigo: prestamos[0].codigo,
+                consumibles: salidasConsumibles !== null ? (salidasConsumibles.length > 0 ? salidasConsumibles : null) : (prestamos.find(p => p.consumibles)?.consumibles ?? null),
+                inventario: inventarioSolicitadoId ? { id: inventarioSolicitadoId } : (contenedor?.inventario ?? { id: 1 } as any),
+              });
+              await this.util.prestamosRepo.save(nuevoPrestamo);
+            }
+          } else if (targetQty < currentQty) {
+            const diff = currentQty - targetQty;
+            for (let i = 0; i < diff; i++) {
+              const itemToRemove = currentItems[i];
+              if (itemToRemove) {
+                await this.canastaItemsRepo.delete({ id: itemToRemove.id });
+              }
+              const prestamoToRemove = currentPrestamos[i];
+              if (prestamoToRemove) {
+                await this.util.prestamosRepo.delete({ id: prestamoToRemove.id });
+              }
+            }
+          }
+        }
+
+        for (const cid of itemsPorContenedor.keys()) {
+          if (!processedContIds.has(cid)) {
+            const currentItems = itemsPorContenedor.get(cid) ?? [];
+            const currentPrestamos = prestamosPorContenedor.get(cid) ?? [];
+            for (const item of currentItems) {
+              await this.canastaItemsRepo.delete({ id: item.id });
+            }
+            for (const prestamo of currentPrestamos) {
+              await this.util.prestamosRepo.delete({ id: prestamo.id });
+            }
+          }
+        }
+      }
+
       await this.reemplazarEstudiantesCanasta(grupoCanasta, estudiantesDestino, false, datos.carnetsRetenidos);
     }
 
@@ -918,36 +1125,77 @@ export class PrestamoCanastaServicio {
     }
 
     if (Array.isArray(datos.equipos)) {
-      const mapeoEntrada = new Map<string, any>(datos.equipos.map((eq: any) => [eq.idHerramienta, eq]));
+      const mapeoEntradaPorId = new Map<number, any>();
+      const mapeoEntradaPorHerramienta = new Map<string, any>();
+      for (const eq of datos.equipos) {
+        if (eq.idPrestamo) {
+          mapeoEntradaPorId.set(Number(eq.idPrestamo), eq);
+        } else if (eq.idHerramienta) {
+          mapeoEntradaPorHerramienta.set(eq.idHerramienta, eq);
+        }
+      }
+
       for (const p of prestamos) {
-        if (!p.codigoHerramienta) continue;
-        const entrada = mapeoEntrada.get(p.codigoHerramienta);
+        const entrada = mapeoEntradaPorId.get(p.id) || (p.codigoHerramienta ? mapeoEntradaPorHerramienta.get(p.codigoHerramienta) : null);
+
         if (!entrada || !entrada.registrado) {
           if (p.itemActivo) {
             await this.util.marcarItemDisponibleAlDevolver(p.itemActivo);
           }
           await this.util.registrarCambioHistorial(p, 'no_despachado', 'no_despachado', 'No despachado (desmarcado por el encargado).', ejecutor);
-          if (grupoCanasta && p.itemActivo) {
-            const existeCanastaItem = await this.canastaItemsRepo.findOne({
-              where: { grupoCanasta, itemActivo: { id: p.itemActivo.id } }
-            });
-            if (existeCanastaItem) {
-              existeCanastaItem.registrado = false;
-              await this.canastaItemsRepo.save(existeCanastaItem);
+          if (grupoCanasta) {
+            if (p.itemActivo) {
+              const existeCanastaItem = await this.canastaItemsRepo.findOne({
+                where: { grupoCanasta, itemActivo: { id: p.itemActivo.id } }
+              });
+              if (existeCanastaItem) {
+                await this.canastaItemsRepo.remove(existeCanastaItem);
+              }
+            } else if (p.contenedor) {
+              const existeCanastaItem = await this.canastaItemsRepo.findOne({
+                where: { grupoCanasta, itemActivo: IsNull(), contenedor: { id: p.contenedor.id } }
+              });
+              if (existeCanastaItem) {
+                await this.canastaItemsRepo.remove(existeCanastaItem);
+              }
             }
           }
           await this.util.prestamosRepo.softRemove(p);
         } else {
+          if (!p.codigoHerramienta && entrada.idHerramienta) {
+            const itemActivo = await this.util.obtenerItemActivo(entrada.idHerramienta);
+            await this.util.validarDisponibilidadItem(entrada.idHerramienta, undefined, itemActivo);
+            p.itemActivo = itemActivo;
+            p.codigoHerramienta = entrada.idHerramienta;
+            p.inventario = itemActivo?.activo?.inventario ?? p.inventario;
+          }
+
           p.estadoFisicoEntrega = entrada.estadoFisicoEntrega || 'bueno';
           p.estado = 'despachado';
           if (p.itemActivo) await this.util.marcarItemEnPrestamo(p.itemActivo);
           await this.util.prestamosRepo.save(p);
 
           if (grupoCanasta && p.itemActivo) {
-            const existeCanastaItem = await this.canastaItemsRepo.findOne({
+            let existeCanastaItem = await this.canastaItemsRepo.findOne({
               where: { grupoCanasta, itemActivo: { id: p.itemActivo.id } }
             });
-            if (existeCanastaItem) {
+            if (!existeCanastaItem) {
+              existeCanastaItem = await this.canastaItemsRepo.findOne({
+                where: { grupoCanasta, itemActivo: IsNull(), contenedor: { id: p.contenedor?.id } }
+              });
+              if (existeCanastaItem) {
+                existeCanastaItem.itemActivo = p.itemActivo;
+                existeCanastaItem.registrado = true;
+                await this.canastaItemsRepo.save(existeCanastaItem);
+              } else {
+                await this.canastaItemsRepo.save(this.canastaItemsRepo.create({
+                  grupoCanasta,
+                  itemActivo: p.itemActivo,
+                  contenedor: p.contenedor,
+                  registrado: true,
+                }));
+              }
+            } else {
               existeCanastaItem.registrado = true;
               await this.canastaItemsRepo.save(existeCanastaItem);
             }
@@ -956,7 +1204,7 @@ export class PrestamoCanastaServicio {
       }
 
       for (const eq of datos.equipos) {
-        if (!eq.registrado) continue;
+        if (!eq.registrado || eq.idPrestamo) continue;
         const yaExiste = prestamos.some((p) => p.codigoHerramienta === eq.idHerramienta);
         if (!yaExiste) {
           const itemActivo = await this.util.obtenerItemActivo(eq.idHerramienta);
