@@ -359,7 +359,12 @@ export class PrestamoServicio {
 
   async devolverPrestamoCompleto(
     id: number,
-    datos: { estadoFisicoDevolucion?: string; carnetDevuelto?: boolean; observaciones?: string },
+    datos: {
+      estadoFisicoDevolucion?: string;
+      carnetDevuelto?: boolean;
+      observaciones?: string;
+      consumibles?: Array<{ idLote: string; cantidadDevuelta: number; estadoDevuelto?: string }>;
+    },
     ejecutor?: any,
   ) {
     const prestamo = await this.util.prestamosRepo.findOne({ where: { id }, relations: ['estudiante', 'docente', 'itemActivo'] });
@@ -377,6 +382,51 @@ export class PrestamoServicio {
     if (carnetDevuelto) prestamo.carnetRetenido = false;
 
     prestamo.fechaDevolucion = new Date(); // Update return date to actual return time!
+
+    if (Array.isArray(datos.consumibles)) {
+      for (const c of datos.consumibles) {
+        let found = false;
+        let cantidadDespachada = 0;
+        let prevDevuelta = 0;
+
+        if (prestamo.consumibles) {
+          const pc = prestamo.consumibles.find((x: any) => x.idLote === c.idLote);
+          if (pc) {
+            cantidadDespachada = pc.cantidadDespachada ?? pc.cantidadSolicitada ?? 0;
+            prevDevuelta = pc.cantidadDevuelta ?? 0;
+            found = true;
+          }
+        }
+
+        if (!found) {
+          throw new BadRequestException(`El lote fungible ${c.idLote} no pertenece a este préstamo.`);
+        }
+
+        const cantDev = Number(c.cantidadDevuelta ?? 0);
+        if (Number.isNaN(cantDev) || cantDev < 0) {
+          throw new BadRequestException(`Cantidad devuelta inválida para el lote ${c.idLote}.`);
+        }
+        if (cantDev > cantidadDespachada) {
+          throw new BadRequestException(`La cantidad devuelta (${cantDev}) no puede ser mayor que la cantidad despachada (${cantidadDespachada}) para el lote ${c.idLote}.`);
+        }
+
+        const diff = cantDev - prevDevuelta;
+        if (diff !== 0) {
+          const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: c.idLote } });
+          if (itemFungible) {
+            itemFungible.cantidad += diff;
+            await this.util.itemsFungiblesRepo.save(itemFungible);
+          }
+        }
+      }
+
+      if (prestamo.consumibles) {
+        prestamo.consumibles = prestamo.consumibles.map((pc) => {
+          const dev = datos.consumibles?.find((c: any) => c.idLote === pc.idLote);
+          return dev ? { ...pc, cantidadDevuelta: Number(dev.cantidadDevuelta ?? 0), estadoDevuelto: dev.estadoDevuelto || 'bueno' } : pc;
+        });
+      }
+    }
 
     const guardado = await this.util.prestamosRepo.save(prestamo);
     if (guardado.itemActivo) {

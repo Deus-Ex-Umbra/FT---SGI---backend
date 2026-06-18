@@ -1395,10 +1395,41 @@ export class PrestamoCanastaServicio {
 
     if (Array.isArray(datos.consumibles)) {
       for (const c of datos.consumibles) {
-        const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: c.idLote } });
-        if (itemFungible && c.cantidadDevuelta > 0) {
-          itemFungible.cantidad += c.cantidadDevuelta;
-          await this.util.itemsFungiblesRepo.save(itemFungible);
+        let found = false;
+        let cantidadDespachada = 0;
+        let prevDevuelta = 0;
+
+        for (const p of prestamos) {
+          if (p.consumibles) {
+            const pc = p.consumibles.find((x: any) => x.idLote === c.idLote);
+            if (pc) {
+              cantidadDespachada = pc.cantidadDespachada ?? pc.cantidadSolicitada ?? 0;
+              prevDevuelta = pc.cantidadDevuelta ?? 0;
+              found = true;
+              break;
+            }
+          }
+        }
+
+        if (!found) {
+          throw new BadRequestException(`El lote fungible ${c.idLote} no pertenece a este préstamo/canasta.`);
+        }
+
+        const cantDev = Number(c.cantidadDevuelta ?? 0);
+        if (Number.isNaN(cantDev) || cantDev < 0) {
+          throw new BadRequestException(`Cantidad devuelta inválida para el lote ${c.idLote}.`);
+        }
+        if (cantDev > cantidadDespachada) {
+          throw new BadRequestException(`La cantidad devuelta (${cantDev}) no puede ser mayor que la cantidad despachada (${cantidadDespachada}) para el lote ${c.idLote}.`);
+        }
+
+        const diff = cantDev - prevDevuelta;
+        if (diff !== 0) {
+          const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: c.idLote } });
+          if (itemFungible) {
+            itemFungible.cantidad += diff;
+            await this.util.itemsFungiblesRepo.save(itemFungible);
+          }
         }
       }
 
@@ -1406,7 +1437,7 @@ export class PrestamoCanastaServicio {
         if (p.consumibles) {
           p.consumibles = p.consumibles.map((pc) => {
             const dev = datos.consumibles?.find((c: any) => c.idLote === pc.idLote);
-            return dev ? { ...pc, cantidadDevuelta: dev.cantidadDevuelta, estadoDevuelto: dev.estadoDevuelto || 'bueno' } : pc;
+            return dev ? { ...pc, cantidadDevuelta: Number(dev.cantidadDevuelta ?? 0), estadoDevuelto: dev.estadoDevuelto || 'bueno' } : pc;
           });
           await this.util.prestamosRepo.save(p);
         }
