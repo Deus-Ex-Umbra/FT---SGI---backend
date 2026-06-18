@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
@@ -61,7 +61,7 @@ const serializarFechaApi = (valor?: unknown): string | undefined => {
 };
 
 @Injectable()
-export class ActivoFijoServicio {
+export class ActivoFijoServicio implements OnModuleInit {
     private readonly registrarEventoInterno = async (_input: unknown) => undefined;
 
     constructor(
@@ -74,6 +74,16 @@ export class ActivoFijoServicio {
         @InjectRepository(InventarioEntidad)
         private readonly inventarioRepositorio: Repository<InventarioEntidad>,
     ) {}
+
+    async onModuleInit() {
+        try {
+            await this.itemActivoRepositorio.query(
+                `UPDATE items_activos it SET id_contenedor = af.id_contenedor FROM activos_fijos af WHERE it.id_activo = af.id AND it.id_contenedor IS NULL AND af.id_contenedor IS NOT NULL`
+            );
+        } catch (err) {
+            // Ignore error
+        }
+    }
 
     public async resolverContextoInventario(usuario: UsuarioAutenticado): Promise<ContextoInventario & { permitidosIds?: number[] }> {
         if (usuario.rol === 'administrador') {
@@ -237,8 +247,8 @@ export class ActivoFijoServicio {
         const consulta = this.activoFijoRepositorio
             .createQueryBuilder('af')
             .leftJoinAndSelect('af.inventario', 'inv')
-            .leftJoinAndSelect('af.contenedor', 'ca', 'ca.deleted_at IS NULL')
             .leftJoinAndSelect('af.items', 'it', 'it.deleted_at IS NULL')
+            .leftJoinAndSelect('it.contenedor', 'itc', 'itc.deleted_at IS NULL')
             .where('af.deleted_at IS NULL');
 
         if (!contexto.esAdmin) {
@@ -262,13 +272,7 @@ export class ActivoFijoServicio {
             categoria: af.categoria,
             descripcion: af.descripcion,
             idInventario: af.inventario?.id ?? null,
-            contenedor: af.contenedor
-                ? {
-                    id: af.contenedor.id,
-                    nombre: af.contenedor.nombre,
-                    ubicacion: af.contenedor.ubicacion,
-                }
-                : null,
+            contenedor: null,
             items: (af.items ?? []).map((it) => ({
                 id: it.id,
                 codigoInventario: it.codigo_inventario ?? null,
@@ -283,6 +287,13 @@ export class ActivoFijoServicio {
                 estadoFisico: it.estado_fisico,
                 observaciones: it.observaciones,
                 precio: Number(it.precio ?? 0),
+                contenedor: it.contenedor
+                    ? {
+                        id: it.contenedor.id,
+                        nombre: it.contenedor.nombre,
+                        ubicacion: it.contenedor.ubicacion,
+                    }
+                    : null,
             })),
         }));
     }
@@ -303,8 +314,8 @@ export class ActivoFijoServicio {
         const consulta = this.activoFijoRepositorio
             .createQueryBuilder('af')
             .leftJoinAndSelect('af.inventario', 'inv')
-            .leftJoinAndSelect('af.contenedor', 'ca', 'ca.deleted_at IS NULL')
             .leftJoinAndSelect('af.items', 'it', 'it.deleted_at IS NULL')
+            .leftJoinAndSelect('it.contenedor', 'itc', 'itc.deleted_at IS NULL')
             .where('af.deleted_at IS NULL')
             .andWhere('af.id_inventario = :idInventario', { idInventario });
 
@@ -319,13 +330,7 @@ export class ActivoFijoServicio {
             categoria: af.categoria,
             descripcion: af.descripcion,
             idInventario: af.inventario?.id ?? null,
-            contenedor: af.contenedor
-                ? {
-                    id: af.contenedor.id,
-                    nombre: af.contenedor.nombre,
-                    ubicacion: af.contenedor.ubicacion,
-                }
-                : null,
+            contenedor: null,
             items: (af.items ?? []).map((it) => ({
                 id: it.id,
                 codigoInventario: it.codigo_inventario ?? null,
@@ -340,6 +345,13 @@ export class ActivoFijoServicio {
                 estadoFisico: it.estado_fisico,
                 observaciones: it.observaciones,
                 precio: Number(it.precio ?? 0),
+                contenedor: it.contenedor
+                    ? {
+                        id: it.contenedor.id,
+                        nombre: it.contenedor.nombre,
+                        ubicacion: it.contenedor.ubicacion,
+                    }
+                    : null,
             })),
         }));
     }
@@ -369,7 +381,6 @@ export class ActivoFijoServicio {
     async crearActivoFijo(
         datos: {
             nombre: string;
-            idContenedor?: number;
             idInventario?: number;
             categoria?: string;
             descripcion?: string;
@@ -382,11 +393,9 @@ export class ActivoFijoServicio {
             throw new BadRequestException('El nombre del activo fijo es obligatorio.');
         }
 
-        const contenedor = await this.obtenerContenedorPorId(datos.idContenedor);
-
         let inventario: InventarioEntidad | null = null;
         if (contexto.esAdmin) {
-            const idInventarioObjetivo = datos.idInventario ?? contenedor?.inventario?.id ?? null;
+            const idInventarioObjetivo = datos.idInventario ?? null;
             inventario = await this.obtenerInventarioPorId(idInventarioObjetivo);
             if (!inventario) {
                 throw new BadRequestException('Debes seleccionar un inventario para crear el activo fijo.');
@@ -405,22 +414,12 @@ export class ActivoFijoServicio {
             throw new BadRequestException('Debes seleccionar un inventario para crear el activo fijo.');
         }
 
-        if (contenedor?.inventario?.id && contenedor.inventario.id !== inventario.id) {
-            throw new BadRequestException('El contenedor pertenece a otro inventario.');
-        }
-
-        if (contenedor && !contenedor.inventario) {
-            contenedor.inventario = inventario;
-            await this.contenedorActivoRepositorio.save(contenedor);
-        }
-
         const categoria = typeof datos.categoria === 'string' && datos.categoria.trim() ? datos.categoria.trim() : 'General';
         const descripcion = typeof datos.descripcion === 'string' && datos.descripcion.trim() ? datos.descripcion.trim() : undefined;
 
         const activo = this.activoFijoRepositorio.create({
             nombre,
             inventario,
-            contenedor,
             categoria,
             descripcion,
         });
@@ -437,6 +436,7 @@ export class ActivoFijoServicio {
     async crearItemActivo(
         datos: {
             idActivo: string | number;
+            idContenedor?: number;
             codigoInventario?: string;
             codigoUnico?: string;
             codigoSistema?: string;
@@ -460,7 +460,7 @@ export class ActivoFijoServicio {
 
         const activo = await this.activoFijoRepositorio.findOne({
             where: { id: idActivo },
-            relations: ['contenedor', 'inventario'],
+            relations: ['inventario'],
         });
         if (!activo) {
             throw new NotFoundException('Activo fijo no encontrado para asociar el item.');
@@ -472,6 +472,13 @@ export class ActivoFijoServicio {
             'No tienes un inventario asignado para crear ítems.',
             'No puedes crear ítems en activos de otro inventario.',
         );
+
+        let contenedor = datos.idContenedor ? await this.obtenerContenedorPorId(datos.idContenedor) : null;
+        if (!contenedor && typeof datos.ubicacion === 'string' && datos.ubicacion.trim()) {
+            contenedor = await this.contenedorActivoRepositorio.findOne({
+                where: { nombre: datos.ubicacion.trim(), inventario: { id: activo.inventario?.id } }
+            });
+        }
 
         const codigoInventario = typeof datos.codigoInventario === 'string' ? datos.codigoInventario.trim() : '';
         const codigoInventarioFinal = codigoInventario || null;
@@ -492,7 +499,7 @@ export class ActivoFijoServicio {
 
         const ue = typeof datos.ue === 'string' && datos.ue.trim()
             ? datos.ue.trim()
-            : (activo.contenedor?.ubicacion?.trim() || undefined);
+            : (contenedor?.ubicacion?.trim() || undefined);
         const descripcion = typeof datos.descripcion === 'string' && datos.descripcion.trim()
             ? datos.descripcion.trim()
             : undefined;
@@ -503,6 +510,7 @@ export class ActivoFijoServicio {
             codigo_unico: codigoUnicoFinal,
             codigo_sistema: codigoSistemaFinal,
             ubicacion: typeof datos.ubicacion === 'string' && datos.ubicacion.trim() ? datos.ubicacion.trim() : undefined,
+            contenedor,
             ue,
             descripcion,
             fecha_entrega: datos.fechaEntrega ? new Date(datos.fechaEntrega) : undefined,
@@ -530,7 +538,7 @@ export class ActivoFijoServicio {
 
     async editarActivoFijo(
         id: number,
-        datos: Partial<{ nombre: string; categoria: string; descripcion: string; idInventario: number; idContenedor?: number }>,
+        datos: Partial<{ nombre: string; categoria: string; descripcion: string; idInventario: number }>,
         usuario: UsuarioAutenticado,
     ): Promise<ActivoFijo> {
         const contexto = await this.resolverContextoInventario(usuario);
@@ -563,18 +571,9 @@ export class ActivoFijoServicio {
             activo.inventario = inventarioNuevo;
         }
 
-        if (datos.idContenedor !== undefined) {
-            const contenedor = await this.obtenerContenedorPorId(datos.idContenedor || undefined);
-            if (contenedor?.inventario?.id && activo.inventario?.id && contenedor.inventario.id !== activo.inventario.id) {
-                throw new BadRequestException('El contenedor seleccionado pertenece a otro inventario.');
-            }
-            activo.contenedor = contenedor;
-        }
-
         const nombreAnterior = activo.nombre;
         const categoriaAnterior = activo.categoria;
         const descripcionAnterior = activo.descripcion;
-        const contenedorAnteriorId = activo.contenedor?.id;
 
         if (typeof datos.nombre === 'string' && datos.nombre.trim()) {
             activo.nombre = datos.nombre.trim();
@@ -596,13 +595,11 @@ export class ActivoFijoServicio {
                     nombre: nombreAnterior,
                     categoria: categoriaAnterior,
                     descripcion: descripcionAnterior,
-                    idContenedor: contenedorAnteriorId,
                 },
                 despues: {
                     nombre: actualizado.nombre,
                     categoria: actualizado.categoria,
                     descripcion: actualizado.descripcion,
-                    idContenedor: actualizado.contenedor?.id,
                 },
             },
         });
@@ -660,6 +657,23 @@ export class ActivoFijoServicio {
         }
         if (typeof datos.ubicacion === 'string') {
             item.ubicacion = datos.ubicacion.trim() || undefined;
+            if (item.ubicacion && item.activo?.inventario?.id) {
+                const contenedor = await this.contenedorActivoRepositorio.findOne({
+                    where: { nombre: item.ubicacion, inventario: { id: item.activo.inventario.id } }
+                });
+                if (contenedor) {
+                    item.contenedor = contenedor;
+                }
+            } else {
+                item.contenedor = null;
+            }
+        }
+        if ((datos as any).idContenedor !== undefined) {
+            const contenedor = await this.obtenerContenedorPorId((datos as any).idContenedor || undefined);
+            item.contenedor = contenedor;
+            if (contenedor) {
+                item.ubicacion = contenedor.nombre;
+            }
         }
         if (typeof datos.ue === 'string') {
             item.ue = datos.ue.trim() || undefined;

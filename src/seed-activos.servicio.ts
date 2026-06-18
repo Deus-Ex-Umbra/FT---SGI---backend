@@ -703,7 +703,6 @@ export class SeedActivosServicio {
                         categoria: 'General',
                         descripcion: normalizado.descripcion ?? undefined,
                         inventario,
-                        contenedor: contenedorAsignado,
                     });
                     nuevosActivos.push(activo);
                     existingActivosMap.set(normalizado.nombre, activo);
@@ -711,10 +710,6 @@ export class SeedActivosServicio {
                     let changedActivo = false;
                     if (activo.descripcion !== (normalizado.descripcion ?? undefined)) {
                         activo.descripcion = normalizado.descripcion ?? undefined;
-                        changedActivo = true;
-                    }
-                    if (activo.contenedor?.id !== contenedorAsignado?.id) {
-                        activo.contenedor = contenedorAsignado;
                         changedActivo = true;
                     }
                     if (changedActivo) {
@@ -743,6 +738,7 @@ export class SeedActivosServicio {
                 const rawDesc = rowEnriquecido?.['Descripción del Activo'] ?? itemSeed.descripcion;
 
                 const nombreContenedor = this.clasificarContenedor(normalizado.nombre, rawDesc, carpeta);
+                const contenedorAsignado = contenedoresMap.get(nombreContenedor) ?? null;
 
                 const activo = existingActivosMap.get(normalizado.nombre)!;
 
@@ -779,6 +775,7 @@ export class SeedActivosServicio {
                         estado_fisico: estadoFisico,
                         estado: 'disponible',
                         precio: 0,
+                        contenedor: contenedorAsignado,
                     });
                     itemsToSave.push(item);
                 } else {
@@ -789,6 +786,7 @@ export class SeedActivosServicio {
                     if (item.descripcion !== rawDesc) { item.descripcion = rawDesc; changedItem = true; }
                     if (item.ue !== ue) { item.ue = ue; changedItem = true; }
                     if (item.estado_fisico !== estadoFisico) { item.estado_fisico = estadoFisico; changedItem = true; }
+                    if (item.contenedor?.id !== contenedorAsignado?.id) { item.contenedor = contenedorAsignado; changedItem = true; }
                     if (item.deleted_at !== null) { item.deleted_at = null; changedItem = true; }
 
                     if (changedItem) {
