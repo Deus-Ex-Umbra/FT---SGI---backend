@@ -460,7 +460,7 @@ export class PrestamoCanastaServicio {
         : (datos.equipos ?? []).map((idHerramienta: string) => ({ idHerramienta, registrado: true })),
     );
     const contenedoresInput = datos.contenedores ?? [];
-    const consumibles = datos.consumibles ?? [];
+    const consumibles = datos.consumibles ?? datos.materiales ?? [];
     if (itemsCanasta.length === 0 && contenedoresInput.length === 0 && consumibles.length === 0) throw new BadRequestException('Canasta vacía.');
 
     const idsContenedores = contenedoresInput.map((c: any) => Number(c.idContenedor)).filter(Boolean);
