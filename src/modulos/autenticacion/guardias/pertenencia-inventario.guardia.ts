@@ -46,8 +46,12 @@ export class PertenenciaInventarioGuardia implements CanActivate {
       throw new ForbiddenException('No tienes ningún inventario asignado.');
     }
 
-    const idInventarioReq = params.idInventario || body.idInventario || query.idInventario ||
+    let idInventarioReq = params.idInventario || body.idInventario || query.idInventario ||
                            params.id_inventario || body.id_inventario || query.id_inventario;
+
+    if (!idInventarioReq && path.includes('inventario/:id') && params.id) {
+      idInventarioReq = params.id;
+    }
 
     if (idInventarioReq) {
       if (usuario.rol === 'encargado_inventario') {
@@ -79,9 +83,19 @@ export class PertenenciaInventarioGuardia implements CanActivate {
 
       if (entityClass) {
         const repo = this.dataSource.getRepository(entityClass);
+        
+        let relations: string[] = [];
+        if (entityClass === 'ActivoFijo' || entityClass === 'ContenedorActivo') {
+          relations = ['inventario'];
+        } else if (entityClass === 'ItemActivoFijo') {
+          relations = ['activo', 'activo.inventario'];
+        } else {
+          relations = ['inventario'];
+        }
+
         const recurso = await repo.findOne({
           where: { id: idRecurso } as any,
-          relations: ['inventario', 'activo', 'activo.inventario'],
+          relations,
         });
 
         if (!recurso) {
