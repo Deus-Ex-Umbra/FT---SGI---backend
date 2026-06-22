@@ -179,18 +179,24 @@ export class SeedActivosServicio {
             }
             return 'Otros';
         } else {
+            if (n.includes('taladro') || d.includes('taladro')) {
+                return 'Taladros';
+            }
             if (
-                n.includes('taladro') || d.includes('taladro') ||
                 n.includes('amoladora') || d.includes('amoladora') ||
                 n.includes('amolador') || d.includes('amolador') ||
-                n.includes('esmeril') || d.includes('esmeril') ||
+                n.includes('esmeril') || d.includes('esmeril')
+            ) {
+                return 'Amoladoras';
+            }
+            if (
                 n.includes('soldar') || d.includes('soldar') ||
                 n.includes('soldadora') || d.includes('soldadora') ||
                 n.includes('compresor') || d.includes('compresor') ||
                 n.includes('aeg') || d.includes('aeg') ||
                 n.includes('dewalt') || d.includes('dewalt')
             ) {
-                return 'Herramientas Eléctricas';
+                return 'Otras Herramientas Eléctricas';
             }
             if (
                 n.includes('scaner') || d.includes('scaner') ||
@@ -658,7 +664,7 @@ export class SeedActivosServicio {
             const activosFijosData = this.cargarJson<{ titulo: string; activos: Array<{ codigo_inventario: string; codigo_unico?: string | null; descripcion: string; estado: string; ue: string; observacion?: string }> }>(`inventarios/${carpeta}/activos-fijos.json`);
             this.logger.log(`Cargando ${activosFijosData.activos.length} activos fijos para ${invConfig.nombre}...`);
 
-            const contenedoresDef = this.cargarJson<Array<{ nombre: string; ubicacion: string }>>(`inventarios/${carpeta}/contenedores.json`);
+            const contenedoresDef = this.cargarJson<Array<{ nombre: string; ubicacion: string; tipo?: 'indefinido' | 'fijo' | 'fungible' }>>(`inventarios/${carpeta}/contenedores.json`);
 
             const contenedoresMap = new Map<string, ContenedorActivo>();
             const contenedoresToSave: ContenedorActivo[] = [];
@@ -670,12 +676,23 @@ export class SeedActivosServicio {
                     cont = this.contenedoresRepo.create({
                         nombre: cDef.nombre,
                         ubicacion: cDef.ubicacion,
+                        tipo: cDef.tipo || 'indefinido',
                         inventario,
                     });
                     contenedoresToSave.push(cont);
-                } else if (cont.ubicacion !== cDef.ubicacion) {
-                    cont.ubicacion = cDef.ubicacion;
-                    contenedoresToSave.push(cont);
+                } else {
+                    let changed = false;
+                    if (cont.ubicacion !== cDef.ubicacion) {
+                        cont.ubicacion = cDef.ubicacion;
+                        changed = true;
+                    }
+                    if (cDef.tipo && cont.tipo !== cDef.tipo) {
+                        cont.tipo = cDef.tipo;
+                        changed = true;
+                    }
+                    if (changed) {
+                        contenedoresToSave.push(cont);
+                    }
                 }
                 contenedoresMap.set(cDef.nombre, cont);
             }

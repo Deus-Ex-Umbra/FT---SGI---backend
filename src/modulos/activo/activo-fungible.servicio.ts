@@ -464,6 +464,7 @@ export class ActivoFungibleServicio {
             stockMinimoHabilitado: false,
             stockMinimo: 0,
             tipoIdentificacion: activo.tipo_identificacion,
+            tipoCantidad: activo.tipo_cantidad,
             idInventario: activo.inventario?.id ?? null,
             contenedor: contenedorObj,
             promedioSolicitado: promedio,
