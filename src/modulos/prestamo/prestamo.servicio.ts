@@ -1056,4 +1056,8 @@ export class PrestamoServicio {
   async eliminarCanastaPrestamo(canastaId: string, ejecutor?: any) {
     return this.prestamoCanastaServicio.eliminarCanastaPrestamo(canastaId, ejecutor);
   }
+  async obtenerCanastaPrestamo(canastaId: string, ejecutor?: any) {
+    return this.prestamoCanastaServicio.obtenerCanastaPrestamoPorId(canastaId, ejecutor);
+  }
 }
+

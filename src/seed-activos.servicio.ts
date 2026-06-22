@@ -496,7 +496,17 @@ export class SeedActivosServicio {
         }
 
         this.logger.log('Seeding Estudiantes...');
-        const estudiantesData = this.cargarJson<Array<{ carnet: string; cu: string; nombre: string; apellido: string; carrera: string; semestre: number; correo?: string }>>('estudiantes/estudiantes.json');
+        let estudiantesData = this.cargarJson<Array<{ carnet: string; cu: string; nombre: string; apellido: string; carrera: string; semestre: number; correo?: string }>>('estudiantes/estudiantes.json');
+        try {
+            const pathFalsos = path.join(__dirname, 'seed', 'estudiantes/estudiantes_falsos.json');
+            if (fs.existsSync(pathFalsos)) {
+                const estudiantesFalsos = this.cargarJson<Array<{ carnet: string; cu: string; nombre: string; apellido: string; carrera: string; semestre: number; correo?: string }>>('estudiantes/estudiantes_falsos.json');
+                estudiantesData = estudiantesData.concat(estudiantesFalsos);
+                this.logger.log(`Se cargaron ${estudiantesFalsos.length} estudiantes falsos adicionales.`);
+            }
+        } catch (err: any) {
+            this.logger.warn(`No se pudo cargar estudiantes_falsos.json: ${String(err.message || err)}`);
+        }
         
         const existingEstudiantes = await this.estudiantesRepo.find({ relations: ['usuario', 'carreraRef'] });
         const existingEstudiantesMap = new Map<string, EstudianteEntidad>(existingEstudiantes.map(e => [e.carnet, e]));
@@ -798,7 +808,6 @@ export class SeedActivosServicio {
             if (itemsToSave.length > 0) {
                 await this.itemsRepo.save(itemsToSave, { chunk: 100 });
             }
-
             const activosFungiblesData = this.cargarJson<Array<{
                 nombre: string;
                 categoria: string;
@@ -806,6 +815,7 @@ export class SeedActivosServicio {
                 tipo_cantidad: string;
                 tipo_identificacion: string;
                 tiene_vencimiento: boolean;
+                contenedor?: string;
                 items: Array<{ lote?: string; serie?: string; cantidad: number; precio: number }>;
             }>>(`inventarios/${carpeta}/activos-fungibles.json`);
 
@@ -813,6 +823,7 @@ export class SeedActivosServicio {
 
             const existingFungibles = await this.activosFungiblesRepo.find({
                 where: { inventario: { id: inventario.id } },
+                relations: ['contenedor'],
             });
             const existingFungiblesMap = new Map<string, ActivoFungible>(existingFungibles.map(f => [f.nombre, f]));
 
@@ -821,6 +832,9 @@ export class SeedActivosServicio {
 
             for (const fungibleSeed of activosFungiblesData) {
                 let fungible = existingFungiblesMap.get(fungibleSeed.nombre);
+                const nombreContenedor = fungibleSeed.contenedor;
+                const contenedorAsignado = nombreContenedor ? (contenedoresMap.get(nombreContenedor) ?? null) : null;
+
                 if (!fungible) {
                     fungible = this.activosFungiblesRepo.create({
                         nombre: fungibleSeed.nombre,
@@ -830,9 +844,19 @@ export class SeedActivosServicio {
                         tipo_identificacion: fungibleSeed.tipo_identificacion as TipoIdentificacionFungible,
                         tiene_vencimiento: fungibleSeed.tiene_vencimiento,
                         inventario,
+                        contenedor: contenedorAsignado,
                     });
                     nuevosFungibles.push(fungible);
                     existingFungiblesMap.set(fungibleSeed.nombre, fungible);
+                } else {
+                    let changedFungible = false;
+                    if (fungible.contenedor?.id !== contenedorAsignado?.id) {
+                        fungible.contenedor = contenedorAsignado;
+                        changedFungible = true;
+                    }
+                    if (changedFungible) {
+                        fungiblesToSave.push(fungible);
+                    }
                 }
             }
 
@@ -842,8 +866,11 @@ export class SeedActivosServicio {
                     existingFungiblesMap.set(sf.nombre, sf);
                 }
             }
+            if (fungiblesToSave.length > 0) {
+                await this.activosFungiblesRepo.save(fungiblesToSave, { chunk: 100 });
+            }
 
-            const existingItemsFungibles = await this.itemsFungiblesRepo.find({ relations: ['activo'] });
+            const existingItemsFungibles = await this.itemsFungiblesRepo.find({ relations: ['activo', 'contenedor'] });
             const existingItemsFungiblesMap = new Map<string, ItemActivoFungible>(
                 existingItemsFungibles.map(item => [`${item.activo.id}_${item.lote ?? ''}_${item.serie ?? ''}`, item])
             );
@@ -852,6 +879,9 @@ export class SeedActivosServicio {
 
             for (const fungibleSeed of activosFungiblesData) {
                 const fungible = existingFungiblesMap.get(fungibleSeed.nombre)!;
+                const nombreContenedor = fungibleSeed.contenedor;
+                const contenedorAsignado = nombreContenedor ? (contenedoresMap.get(nombreContenedor) ?? null) : null;
+
                 for (const itemSeed of fungibleSeed.items) {
                     const key = `${fungible.id}_${itemSeed.lote ?? ''}_${itemSeed.serie ?? ''}`;
                     let itemF = existingItemsFungiblesMap.get(key);
@@ -864,12 +894,14 @@ export class SeedActivosServicio {
                             cantidad: itemSeed.cantidad,
                             precio: itemSeed.precio,
                             estado: 'disponible',
+                            contenedor: contenedorAsignado,
                         });
                         itemsFungiblesToSave.push(itemF);
                     } else {
                         let changedItemF = false;
                         if (itemF.cantidad !== itemSeed.cantidad) { itemF.cantidad = itemSeed.cantidad; changedItemF = true; }
                         if (itemF.precio !== itemSeed.precio) { itemF.precio = itemSeed.precio; changedItemF = true; }
+                        if (itemF.contenedor?.id !== contenedorAsignado?.id) { itemF.contenedor = contenedorAsignado; changedItemF = true; }
                         if (changedItemF) {
                             itemsFungiblesToSave.push(itemF);
                         }

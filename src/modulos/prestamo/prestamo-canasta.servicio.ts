@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets, IsNull } from 'typeorm';
 import { PrestamoEntidad } from './entidades/prestamo.entidad';
@@ -1588,4 +1588,37 @@ export class PrestamoCanastaServicio {
     }
     await this.util.sincronizarCarnetsRetenidosEnLote();
   }
+
+  async obtenerCanastaPrestamoPorId(canastaId: string, ejecutor?: any) {
+    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
+    if (prestamos.length === 0) throw new NotFoundException('Canasta no encontrada.');
+
+    const primero = prestamos[0];
+    if (ejecutor) {
+      if (ejecutor.rol === 'docente') {
+        if (primero.docente?.id !== ejecutor.id) {
+          throw new ForbiddenException('No tienes permiso para ver esta canasta.');
+        }
+      } else if (ejecutor.rol === 'estudiante') {
+        const estudiantes = primero.grupoCanasta
+          ? await this.obtenerEstudiantesCanasta(primero.grupoCanasta)
+          : [primero.estudiante];
+        const esParticipante = estudiantes.some((e) => e.usuario?.id === ejecutor.id);
+        if (!esParticipante) {
+          throw new ForbiddenException('No tienes permiso para ver esta canasta.');
+        }
+      }
+    }
+
+    const grupoCanasta = primero.grupoCanasta;
+    const estudiantes = grupoCanasta
+      ? await this.obtenerEstudiantesCanasta(grupoCanasta)
+      : [primero.estudiante];
+    const detalles = grupoCanasta
+      ? await this.obtenerDetallesItemsCanasta(grupoCanasta)
+      : [];
+
+    return this.mapCanastaDto(prestamos, [], estudiantes, detalles);
+  }
 }
+

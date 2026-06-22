@@ -123,6 +123,12 @@ export class PrestamoControlador {
     return this.prestamoServicio.obtenerCanastasPrestamo(req.user);
   }
 
+  @Get('canastas/:id')
+  async obtenerCanasta(@Request() req: any, @Param('id') canastaId: string) {
+    return this.prestamoServicio.obtenerCanastaPrestamo(canastaId, req.user);
+  }
+
+
   @Post('canastas')
   async crearCanastaPrestamo(
     @Request() req: any,
