@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { BeforeInsert, Column, CreateDateColumn, DeleteDateColumn, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 import { ActivoFungible } from './activo-fungible.entidad';
+import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
 
 @Entity('items_activos_fungibles')
 export class ItemActivoFungible {
@@ -10,6 +11,10 @@ export class ItemActivoFungible {
     @ManyToOne(() => ActivoFungible, (activo) => activo.items, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'id_activo' })
     activo!: ActivoFungible;
+
+    @ManyToOne(() => ContenedorActivo, (contenedor: ContenedorActivo) => contenedor.itemsFungibles, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'id_contenedor' })
+    contenedor?: ContenedorActivo | null;
 
     @Column({ name: 'codigo_sistema', type: 'varchar', length: 36, unique: true, nullable: true })
     codigo_sistema!: string | null;

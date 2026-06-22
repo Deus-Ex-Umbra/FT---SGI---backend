@@ -9,6 +9,7 @@ import { ActivoFijo } from './entidades/activo-fijo.entidad';
 import { ItemActivoFijo } from './entidades/item-activo-fijo.entidad';
 import { TRANSICIONES_ESTADO_ITEM, normalizarEstadoItem, requiereJustificacionTransicion } from './dominio/reglas-estado-item';
 import { normalizarEstadoFisicoItem } from './dominio/reglas-estado-fisico-item';
+import { ActivoContenedorServicio } from './activo-contenedor.servicio';
 
 type ItemActivoFijoApi = {
     id: string;
@@ -73,6 +74,7 @@ export class ActivoFijoServicio implements OnModuleInit {
         private readonly itemActivoRepositorio: Repository<ItemActivoFijo>,
         @InjectRepository(InventarioEntidad)
         private readonly inventarioRepositorio: Repository<InventarioEntidad>,
+        private readonly contenedorServicio: ActivoContenedorServicio,
     ) {}
 
     async onModuleInit() {
@@ -480,6 +482,16 @@ export class ActivoFijoServicio implements OnModuleInit {
             });
         }
 
+        if (contenedor) {
+            if (contenedor.tipo === 'fungible') {
+                throw new BadRequestException('El contenedor seleccionado está reservado para activos fungibles.');
+            }
+            if (contenedor.tipo === 'indefinido') {
+                contenedor.tipo = 'fijo';
+                await this.contenedorActivoRepositorio.save(contenedor);
+            }
+        }
+
         const codigoInventario = typeof datos.codigoInventario === 'string' ? datos.codigoInventario.trim() : '';
         const codigoInventarioFinal = codigoInventario || null;
         const codigoUnico = typeof datos.codigoUnico === 'string' ? datos.codigoUnico.trim() : '';
@@ -522,6 +534,10 @@ export class ActivoFijoServicio implements OnModuleInit {
         });
 
         const guardado = await this.itemActivoRepositorio.save(item);
+        if (contenedor) {
+            await this.contenedorServicio.actualizarTipoContenedor(null, contenedor.id);
+        }
+
         await this.registrarEventoInterno({
             entidad: 'ItemActivo',
             entidadId: guardado.id,
@@ -626,10 +642,12 @@ export class ActivoFijoServicio implements OnModuleInit {
         usuario: UsuarioAutenticado,
     ): Promise<ItemActivoFijo> {
         const contexto = await this.resolverContextoInventario(usuario);
-        const item = await this.itemActivoRepositorio.findOne({ where: { id }, relations: ['activo', 'activo.inventario'] });
+        const item = await this.itemActivoRepositorio.findOne({ where: { id }, relations: ['activo', 'activo.inventario', 'contenedor'] });
         if (!item) throw new NotFoundException('Item de activo no encontrado.');
 
         this.validarAccAccess(contexto, item);
+
+        const contenedorAnteriorId = item.contenedor?.id;
 
         const snapshotAntes = {
             codigoInventario: item.codigo_inventario,
@@ -662,7 +680,14 @@ export class ActivoFijoServicio implements OnModuleInit {
                     where: { nombre: item.ubicacion, inventario: { id: item.activo.inventario.id } }
                 });
                 if (contenedor) {
+                    if (contenedor.tipo === 'fungible') {
+                        throw new BadRequestException('El contenedor seleccionado está reservado para activos fungibles.');
+                    }
                     item.contenedor = contenedor;
+                    if (contenedor.tipo === 'indefinido') {
+                        contenedor.tipo = 'fijo';
+                        await this.contenedorActivoRepositorio.save(contenedor);
+                    }
                 }
             } else {
                 item.contenedor = null;
@@ -670,9 +695,18 @@ export class ActivoFijoServicio implements OnModuleInit {
         }
         if ((datos as any).idContenedor !== undefined) {
             const contenedor = await this.obtenerContenedorPorId((datos as any).idContenedor || undefined);
-            item.contenedor = contenedor;
             if (contenedor) {
+                if (contenedor.tipo === 'fungible') {
+                    throw new BadRequestException('El contenedor seleccionado está reservado para activos fungibles.');
+                }
+                item.contenedor = contenedor;
                 item.ubicacion = contenedor.nombre;
+                if (contenedor.tipo === 'indefinido') {
+                    contenedor.tipo = 'fijo';
+                    await this.contenedorActivoRepositorio.save(contenedor);
+                }
+            } else {
+                item.contenedor = null;
             }
         }
         if (typeof datos.ue === 'string') {
@@ -711,6 +745,12 @@ export class ActivoFijoServicio implements OnModuleInit {
             if (Number.isFinite(precio)) item.precio = precio;
         }
         const actualizado = await this.itemActivoRepositorio.save(item);
+        if (contenedorAnteriorId) {
+            await this.contenedorServicio.actualizarTipoContenedor(null, contenedorAnteriorId);
+        }
+        if (actualizado.contenedor?.id) {
+            await this.contenedorServicio.actualizarTipoContenedor(null, actualizado.contenedor.id);
+        }
         if (normalizarEstadoItem(actualizado.estado) === 'dado_de_baja') {
             await this.itemActivoRepositorio.softRemove(actualizado);
         }
@@ -781,7 +821,7 @@ export class ActivoFijoServicio implements OnModuleInit {
 
     async eliminarItemActivo(id: string, usuario: UsuarioAutenticado): Promise<void> {
         const contexto = await this.resolverContextoInventario(usuario);
-        const item = await this.itemActivoRepositorio.findOne({ where: { id }, relations: ['activo', 'activo.inventario'] });
+        const item = await this.itemActivoRepositorio.findOne({ where: { id }, relations: ['activo', 'activo.inventario', 'contenedor'] });
         if (!item) throw new NotFoundException('Item de activo no encontrado.');
 
         this.validarAccesoRecursoPorInventario(
@@ -791,7 +831,12 @@ export class ActivoFijoServicio implements OnModuleInit {
             'No puedes eliminar ítems de otro inventario.',
         );
 
+        const contenedorId = item.contenedor?.id;
+
         await this.itemActivoRepositorio.softRemove(item);
+        if (contenedorId) {
+            await this.contenedorServicio.actualizarTipoContenedor(null, contenedorId);
+        }
         await this.registrarEventoInterno({
             entidad: 'ItemActivo',
             entidadId: item.id,

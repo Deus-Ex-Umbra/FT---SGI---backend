@@ -3,6 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
 import { InventarioEntidad } from '@/modulos/inventario/entidades/inventario.entidad';
+import { ActivoFijo } from '@/modulos/activo/entidades/activo-fijo.entidad';
+import { ItemActivoFijo } from '@/modulos/activo/entidades/item-activo-fijo.entidad';
+import { ActivoFungible } from '@/modulos/activo/entidades/activo-fungible.entidad';
+import { ItemActivoFungible } from '@/modulos/activo/entidades/item-activo-fungible.entidad';
 
 type UsuarioAutenticado = {
     id: number;
@@ -183,5 +187,31 @@ export class ActivoContenedorServicio {
         }
 
         return this.contenedorActivoRepositorio.save(contenedor);
+    }
+
+    async actualizarTipoContenedor(manager: any | null, idContenedor: number): Promise<void> {
+        const activeManager = manager ?? this.contenedorActivoRepositorio.manager;
+        const repoContenedor = activeManager.getRepository(ContenedorActivo);
+        const repoItemFijo = activeManager.getRepository(ItemActivoFijo);
+        const repoItemFungible = activeManager.getRepository(ItemActivoFungible);
+        const repoFijo = activeManager.getRepository(ActivoFijo);
+        const repoFungible = activeManager.getRepository(ActivoFungible);
+
+        const cantFijos = await repoItemFijo.count({ where: { contenedor: { id: idContenedor } } });
+        const cantFijosParent = await repoFijo.count({ where: { contenedor: { id: idContenedor } } });
+        const cantFungibles = await repoItemFungible.count({ where: { contenedor: { id: idContenedor } } });
+        const cantFungiblesParent = await repoFungible.count({ where: { contenedor: { id: idContenedor } } });
+
+        const totalFijos = cantFijos + cantFijosParent;
+        const totalFungibles = cantFungibles + cantFungiblesParent;
+
+        let nuevoTipo: 'indefinido' | 'fijo' | 'fungible' = 'indefinido';
+        if (totalFijos > 0) {
+            nuevoTipo = 'fijo';
+        } else if (totalFungibles > 0) {
+            nuevoTipo = 'fungible';
+        }
+
+        await repoContenedor.update(idContenedor, { tipo: nuevoTipo });
     }
 }

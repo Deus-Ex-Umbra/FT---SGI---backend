@@ -1,6 +1,7 @@
 import { InventarioEntidad } from '@/modulos/inventario/entidades/inventario.entidad';
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { ItemActivoFungible } from './item-activo-fungible.entidad';
+import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
 
 export enum TipoCantidadFungible {
     Entero = 'entero',
@@ -48,6 +49,10 @@ export class ActivoFungible {
     @ManyToOne(() => InventarioEntidad, (inventario: InventarioEntidad) => inventario.activosFungibles, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'id_inventario' })
     inventario?: InventarioEntidad | null;
+
+    @ManyToOne(() => ContenedorActivo, (contenedor: ContenedorActivo) => contenedor.activosFungibles, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'id_contenedor' })
+    contenedor?: ContenedorActivo | null;
 
     @OneToMany(() => ItemActivoFungible, (item) => item.activo)
     items!: ItemActivoFungible[];

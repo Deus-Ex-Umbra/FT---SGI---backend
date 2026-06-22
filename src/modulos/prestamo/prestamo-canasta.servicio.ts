@@ -6,6 +6,7 @@ import { CanastaPrestamoItemEntidad } from './entidades/canasta-prestamo-item.en
 import { EstudianteEntidad } from '@/modulos/estudiante/entidades/estudiante.entidad';
 import { PrestamoUtilServicio } from './prestamo-util.servicio';
 import { ContenedorActivo } from '@/modulos/contenedor/entidades/contenedor-activo.entidad';
+import { ActivoFungible } from '@/modulos/activo/entidades/activo-fungible.entidad';
 
 @Injectable()
 export class PrestamoCanastaServicio {
@@ -259,6 +260,8 @@ export class PrestamoCanastaServicio {
 
     const consumiblesMapeados = consumiblesCanasta.map((con: any) => ({
       idLote: con.idLote,
+      idActivoFungible: con.idActivoFungible ?? null,
+      idContenedor: con.idContenedor ?? null,
       lote: con.lote,
       material: con.material,
       cantidadSolicitada: con.cantidadSolicitada ?? con.cantidad ?? 0,
@@ -501,29 +504,59 @@ export class PrestamoCanastaServicio {
 
     const salidasConsumibles: any[] = [];
     for (const salida of consumibles) {
-      const idLote = String(salida.idLote ?? '').trim();
-      if (!idLote) throw new BadRequestException('Lote inválido.');
+      const idLote = salida.idLote ? String(salida.idLote).trim() : null;
+      const idActivoFungible = salida.idActivoFungible ? Number(salida.idActivoFungible) : null;
+      const idContenedor = salida.idContenedor ? Number(salida.idContenedor) : null;
       const cantidad = Number(salida.cantidad ?? 0);
-      if (!Number.isFinite(cantidad) || cantidad <= 0) throw new BadRequestException(`Cantidad inválida para ${idLote}.`);
+      if (!Number.isFinite(cantidad) || cantidad <= 0) throw new BadRequestException('Cantidad de consumible inválida.');
 
-      const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: idLote }, relations: ['activo'] });
-      if (!itemFungible) throw new NotFoundException(`Fungible no encontrado: ${idLote}`);
+      if (idLote) {
+        const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: idLote }, relations: ['activo', 'contenedor'] });
+        if (!itemFungible) throw new NotFoundException(`Fungible no encontrado: ${idLote}`);
 
-      if (estadoInicial === 'despachado') {
-        if (itemFungible.cantidad < cantidad) throw new BadRequestException(`Stock insuficiente para ${itemFungible.activo?.nombre || itemFungible.id}.`);
-        itemFungible.cantidad -= cantidad;
-        await this.util.itemsFungiblesRepo.save(itemFungible);
+        if (estadoInicial === 'despachado') {
+          if (itemFungible.cantidad < cantidad) throw new BadRequestException(`Stock insuficiente para ${itemFungible.activo?.nombre || itemFungible.id}.`);
+          itemFungible.cantidad -= cantidad;
+          await this.util.itemsFungiblesRepo.save(itemFungible);
+        }
+
+        salidasConsumibles.push({
+          idLote: itemFungible.id,
+          idActivoFungible: itemFungible.activo.id,
+          idContenedor: itemFungible.contenedor?.id ?? null,
+          lote: itemFungible.lote ?? itemFungible.serie ?? 'Sistema',
+          material: itemFungible.activo?.nombre ?? 'Material',
+          cantidadSolicitada: cantidad,
+          cantidadDespachada: estadoInicial === 'despachado' ? cantidad : 0,
+          cantidadDevuelta: 0,
+          motivo: salida.motivo?.trim() || (estadoInicial === 'despachado' ? 'Salida por canasta' : 'Solicitud'),
+        });
+      } else {
+        if (!idActivoFungible) {
+          throw new BadRequestException('Para solicitudes genéricas de fungibles se requiere idActivoFungible.');
+        }
+        const activoFungible = await this.util.itemsFungiblesRepo.manager.getRepository(ActivoFungible).findOne({
+          where: { id: idActivoFungible },
+          relations: ['contenedor']
+        });
+        if (!activoFungible) throw new NotFoundException(`Activo fungible no encontrado.`);
+
+        if (estadoInicial === 'despachado') {
+          throw new BadRequestException('No se puede despachar directamente una solicitud genérica de consumibles. Debe seleccionar un lote físico.');
+        }
+
+        salidasConsumibles.push({
+          idLote: null,
+          idActivoFungible: activoFungible.id,
+          idContenedor: idContenedor ?? activoFungible.contenedor?.id ?? null,
+          lote: null,
+          material: activoFungible.nombre,
+          cantidadSolicitada: cantidad,
+          cantidadDespachada: 0,
+          cantidadDevuelta: 0,
+          motivo: salida.motivo?.trim() || 'Solicitud genérica',
+        });
       }
-
-      salidasConsumibles.push({
-        idLote: itemFungible.id,
-        lote: itemFungible.lote ?? itemFungible.serie ?? 'Sistema',
-        material: itemFungible.activo?.nombre ?? 'Material',
-        cantidadSolicitada: cantidad,
-        cantidadDespachada: estadoInicial === 'despachado' ? cantidad : 0,
-        cantidadDevuelta: 0,
-        motivo: salida.motivo?.trim() || (estadoInicial === 'despachado' ? 'Salida por canasta' : 'Solicitud'),
-      });
     }
 
     const prestamosCreados: any[] = [];
@@ -688,37 +721,61 @@ export class PrestamoCanastaServicio {
       const isDespachado = prestamos.some(p => p.estado === 'despachado' || p.estado === 'activo');
       
       for (const salida of datos.materiales) {
-        const idLote = String(salida.idLote ?? '').trim();
-        if (!idLote) throw new BadRequestException('Lote inválido.');
+        const idLote = salida.idLote ? String(salida.idLote).trim() : null;
+        const idActivoFungible = salida.idActivoFungible ? Number(salida.idActivoFungible) : null;
+        const idContenedor = salida.idContenedor ? Number(salida.idContenedor) : null;
         const cantidad = Number(salida.cantidad ?? 0);
-        if (!Number.isFinite(cantidad) || cantidad <= 0) throw new BadRequestException(`Cantidad inválida para ${idLote}.`);
+        if (!Number.isFinite(cantidad) || cantidad <= 0) throw new BadRequestException(`Cantidad inválida.`);
 
-        const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: idLote }, relations: ['activo'] });
-        if (!itemFungible) throw new NotFoundException(`Fungible no encontrado: ${idLote}`);
+        if (idLote) {
+          const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: idLote }, relations: ['activo', 'contenedor'] });
+          if (!itemFungible) throw new NotFoundException(`Fungible no encontrado: ${idLote}`);
 
-        if (isDespachado) {
-          const pConLote = prestamos.find(p => p.consumibles)?.consumibles?.find((pc: any) => pc.idLote === idLote);
-          const prevCantDespachada = pConLote?.cantidadDespachada ?? 0;
-          const diff = cantidad - prevCantDespachada;
-          if (diff > 0) {
-            if (itemFungible.cantidad < diff) throw new BadRequestException(`Stock insuficiente para ${itemFungible.activo?.nombre || itemFungible.id}.`);
-            itemFungible.cantidad -= diff;
-            await this.util.itemsFungiblesRepo.save(itemFungible);
-          } else if (diff < 0) {
-            itemFungible.cantidad += Math.abs(diff);
-            await this.util.itemsFungiblesRepo.save(itemFungible);
+          if (isDespachado) {
+            const pConLote = prestamos.find(p => p.consumibles)?.consumibles?.find((pc: any) => pc.idLote === idLote);
+            const prevCantDespachada = pConLote?.cantidadDespachada ?? 0;
+            const diff = cantidad - prevCantDespachada;
+            if (diff > 0) {
+              if (itemFungible.cantidad < diff) throw new BadRequestException(`Stock insuficiente para ${itemFungible.activo?.nombre || itemFungible.id}.`);
+              itemFungible.cantidad -= diff;
+              await this.util.itemsFungiblesRepo.save(itemFungible);
+            } else if (diff < 0) {
+              itemFungible.cantidad += Math.abs(diff);
+              await this.util.itemsFungiblesRepo.save(itemFungible);
+            }
           }
-        }
 
-        salidasConsumibles.push({
-          idLote: itemFungible.id,
-          lote: itemFungible.lote ?? itemFungible.serie ?? 'Sistema',
-          material: itemFungible.activo?.nombre ?? 'Material',
-          cantidadSolicitada: cantidad,
-          cantidadDespachada: isDespachado ? cantidad : 0,
-          cantidadDevuelta: 0,
-          motivo: salida.motivo?.trim() || (isDespachado ? 'Salida por canasta' : 'Solicitud'),
-        });
+          salidasConsumibles.push({
+            idLote: itemFungible.id,
+            idActivoFungible: itemFungible.activo.id,
+            idContenedor: itemFungible.contenedor?.id ?? null,
+            lote: itemFungible.lote ?? itemFungible.serie ?? 'Sistema',
+            material: itemFungible.activo?.nombre ?? 'Material',
+            cantidadSolicitada: cantidad,
+            cantidadDespachada: isDespachado ? cantidad : 0,
+            cantidadDevuelta: 0,
+            motivo: salida.motivo?.trim() || (isDespachado ? 'Salida por canasta' : 'Solicitud'),
+          });
+        } else {
+          if (!idActivoFungible) throw new BadRequestException('Para solicitudes genéricas de fungibles se requiere idActivoFungible.');
+          const activoFungible = await this.util.itemsFungiblesRepo.manager.getRepository(ActivoFungible).findOne({
+            where: { id: idActivoFungible },
+            relations: ['contenedor']
+          });
+          if (!activoFungible) throw new NotFoundException(`Activo fungible no encontrado.`);
+
+          salidasConsumibles.push({
+            idLote: null,
+            idActivoFungible: activoFungible.id,
+            idContenedor: idContenedor ?? activoFungible.contenedor?.id ?? null,
+            lote: null,
+            material: activoFungible.nombre,
+            cantidadSolicitada: cantidad,
+            cantidadDespachada: 0,
+            cantidadDevuelta: 0,
+            motivo: salida.motivo?.trim() || 'Solicitud genérica',
+          });
+        }
       }
 
       if (isDespachado) {
@@ -1248,19 +1305,55 @@ export class PrestamoCanastaServicio {
     const consumiblesDespachados: any[] = [];
     if (Array.isArray(datos.consumibles)) {
       for (const c of datos.consumibles) {
-        const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: c.idLote }, relations: ['activo'] });
-        if (!itemFungible) throw new NotFoundException(`Fungible ${c.idLote} no encontrado.`);
-        if (itemFungible.cantidad < c.cantidad) throw new BadRequestException(`Stock insuficiente.`);
-        itemFungible.cantidad -= c.cantidad;
+        if (!c.idLote) {
+          throw new BadRequestException('Se debe especificar un lote físico real (idLote) para todos los consumibles a despachar.');
+        }
+        const itemFungible = await this.util.itemsFungiblesRepo.findOne({ where: { id: c.idLote }, relations: ['activo', 'contenedor'] });
+        if (!itemFungible) throw new NotFoundException(`Lote fungible ${c.idLote} no encontrado.`);
+
+        const cantADespachar = Number(c.cantidad ?? c.cantidadDespachada ?? 0);
+        if (!Number.isFinite(cantADespachar) || cantADespachar <= 0) {
+          throw new BadRequestException(`Cantidad inválida para despachar el material ${itemFungible.activo?.nombre}.`);
+        }
+
+        if (itemFungible.cantidad < cantADespachar) {
+          throw new BadRequestException(`Stock insuficiente para el lote del material ${itemFungible.activo?.nombre}.`);
+        }
+
+        itemFungible.cantidad -= cantADespachar;
         await this.util.itemsFungiblesRepo.save(itemFungible);
+
+        // Find original request in prestamos to match cantidadSolicitada and motivo
+        let cantidadSolicitada = cantADespachar;
+        let motivo = 'Despachado por canasta';
+        let idActivoFungible = itemFungible.activo.id;
+        let idContenedor = itemFungible.contenedor?.id ?? null;
+
+        for (const p of prestamos) {
+          if (p.consumibles) {
+            const orig = p.consumibles.find((x: any) =>
+              (x.idLote === c.idLote) ||
+              (x.idLote === null && Number(x.idActivoFungible) === Number(itemFungible.activo.id))
+            ) as any;
+            if (orig) {
+              cantidadSolicitada = orig.cantidadSolicitada ?? orig.cantidad ?? cantADespachar;
+              motivo = orig.motivo ?? motivo;
+              idContenedor = orig.idContenedor ?? idContenedor;
+              break;
+            }
+          }
+        }
+
         consumiblesDespachados.push({
           idLote: c.idLote,
+          idActivoFungible,
+          idContenedor,
           lote: itemFungible.lote || itemFungible.serie || 'Lote',
           material: itemFungible.activo?.nombre || 'Material',
-          cantidadSolicitada: c.cantidad,
-          cantidadDespachada: c.cantidad,
+          cantidadSolicitada,
+          cantidadDespachada: cantADespachar,
           cantidadDevuelta: 0,
-          motivo: 'Despachado por canasta',
+          motivo,
         });
       }
     }
