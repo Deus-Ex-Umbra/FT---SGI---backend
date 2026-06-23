@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdministradorUsuariosControlador } from './administrador-usuarios.controlador';
 import { AdministradorDocenciaControlador } from './administrador-docencia.controlador';
 import { AdministradorDatosControlador } from './administrador-datos.controlador';
+import { AdministradorCatalogoControlador } from './administrador-catalogo.controlador';
 import { UsuarioModulo } from '@/modulos/usuario/usuario.modulo';
 import { DocenteModulo } from '@/modulos/docente/docente.modulo';
 import { EstudianteModulo } from '@/modulos/estudiante/estudiante.modulo';
@@ -25,6 +26,7 @@ import { SeedModulo } from '@/seed.modulo';
     AdministradorUsuariosControlador,
     AdministradorDocenciaControlador,
     AdministradorDatosControlador,
+    AdministradorCatalogoControlador,
   ],
   providers: [],
 })
