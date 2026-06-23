@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { SubgrupoPrestamoDocenciaEntidad } from './entidades/subgrupo-prestamo-docencia.entidad';
 import { EstudianteEntidad } from '@/modulos/estudiante/entidades/estudiante.entidad';
 import { DocenciaGruposServicio } from './docencia-grupos.servicio';
@@ -84,20 +84,33 @@ export class DocenciaSubgruposServicio {
   }
 
   async listarSubgruposPrestamo(usuarioId: number, grupoId: string, rol?: string) {
+    let subgrupos: SubgrupoPrestamoDocenciaEntidad[] = [];
     if (rol === 'estudiante') {
       const estudiante = await this.repoEstudiantes.findOne({ where: { usuario: { id: usuarioId } } });
       if (!estudiante) return [];
-      return await this.repoSubgruposPrestamo.find({
+      subgrupos = await this.repoSubgruposPrestamo.find({
         where: { grupoMateria: { id: grupoId }, responsableEstudianteId: estudiante.id },
+        order: { codigo: 'ASC', id: 'ASC' },
+      });
+    } else {
+      const grupo = await this.gruposServicio.obtenerGrupoParaDocente(usuarioId, grupoId, { requiereAprobado: true });
+      subgrupos = await this.repoSubgruposPrestamo.find({
+        where: { grupoMateria: { id: grupo.id } },
         order: { codigo: 'ASC', id: 'ASC' },
       });
     }
 
-    const grupo = await this.gruposServicio.obtenerGrupoParaDocente(usuarioId, grupoId, { requiereAprobado: true });
-    return await this.repoSubgruposPrestamo.find({
-      where: { grupoMateria: { id: grupo.id } },
-      order: { codigo: 'ASC', id: 'ASC' },
-    });
+    const todosEstudianteIds = Array.from(new Set(subgrupos.flatMap(s => s.estudianteIds || [])));
+    const estudiantes = todosEstudianteIds.length > 0 
+      ? await this.repoEstudiantes.find({ where: { id: In(todosEstudianteIds) } })
+      : [];
+    
+    const estudiantesMap = new Map(estudiantes.map(e => [e.id, { id: e.id, carnet: e.carnet, nombre: e.nombre, apellido: e.apellido }]));
+
+    return subgrupos.map(s => ({
+      ...s,
+      estudiantesDetalles: (s.estudianteIds || []).map(id => estudiantesMap.get(id)).filter(Boolean)
+    }));
   }
 
   async listarMateriasLideradas(usuarioId: number) {
