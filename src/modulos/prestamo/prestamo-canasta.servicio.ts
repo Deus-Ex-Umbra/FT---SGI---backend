@@ -157,20 +157,20 @@ export class PrestamoCanastaServicio {
       if (!Number.isInteger(id) || id <= 0) throw new BadRequestException('Identificador de canasta individual no válido.');
       const unico = await this.util.prestamosRepo.findOne({
         where: { id },
-        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor'],
+        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor', 'inventario'],
       });
       if (!unico || unico.deletedAt) throw new NotFoundException('Canasta no encontrada.');
       return [unico];
     }
     let items = await this.util.prestamosRepo.find({
       where: { grupoCanasta: limpio },
-      relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor'],
+      relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor', 'inventario'],
       order: { id: 'ASC' },
     });
     if (items.length === 0) {
       items = await this.util.prestamosRepo.find({
         where: { codigo: limpio },
-        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor'],
+        relations: ['estudiante', 'estudiante.carreraRef', 'estudiante.cus', 'estudiante.cus.carreras', 'docente', 'itemActivo', 'itemActivo.activo', 'contenedor', 'inventario'],
         order: { id: 'ASC' },
       });
     }
@@ -276,6 +276,7 @@ export class PrestamoCanastaServicio {
       id: idCanasta,
       grupoCanasta: primero.grupoCanasta ?? null,
       codigo: primero.codigo ?? null,
+      idInventario: primero.inventario?.id ?? null,
       idsPrestamo: prestamos.map((p) => p.id),
       carnetEstudiante: estudiantes[0]?.carnet ?? primero.estudiante?.carnet ?? '',
       carnetsEstudiantes: estudiantes.map((e) => e.carnet),
@@ -1181,7 +1182,23 @@ export class PrestamoCanastaServicio {
       }
     }
 
-    if (Array.isArray(datos.equipos)) {
+    let puedeEditarFijos = false;
+    let puedeEditarFungibles = false;
+
+    if (ejecutor?.rol === 'administrador') {
+      puedeEditarFijos = true;
+      puedeEditarFungibles = true;
+    } else if (ejecutor?.rol === 'encargado_inventario') {
+      const encargado = await this.util.encargadosRepo.findOne({
+        where: { usuario: { id: ejecutor.id } }
+      });
+      if (encargado) {
+        puedeEditarFijos = encargado.puedeEditarFijos === true;
+        puedeEditarFungibles = encargado.puedeEditarFungibles === true;
+      }
+    }
+
+    if (puedeEditarFijos && Array.isArray(datos.equipos)) {
       const mapeoEntradaPorId = new Map<number, any>();
       const mapeoEntradaPorHerramienta = new Map<string, any>();
       for (const eq of datos.equipos) {
@@ -1193,6 +1210,9 @@ export class PrestamoCanastaServicio {
       }
 
       for (const p of prestamos) {
+        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        if (!esActivoFijo) continue;
+
         const entrada = mapeoEntradaPorId.get(p.id) || (p.codigoHerramienta ? mapeoEntradaPorHerramienta.get(p.codigoHerramienta) : null);
 
         if (!entrada || !entrada.registrado) {
@@ -1294,16 +1314,19 @@ export class PrestamoCanastaServicio {
           }
         }
       }
-    } else {
+    } else if (puedeEditarFijos) {
       for (const p of prestamos) {
-        p.estado = 'despachado';
-        if (p.itemActivo) await this.util.marcarItemEnPrestamo(p.itemActivo);
-        await this.util.prestamosRepo.save(p);
+        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        if (esActivoFijo) {
+          p.estado = 'despachado';
+          if (p.itemActivo) await this.util.marcarItemEnPrestamo(p.itemActivo);
+          await this.util.prestamosRepo.save(p);
+        }
       }
     }
 
     const consumiblesDespachados: any[] = [];
-    if (Array.isArray(datos.consumibles)) {
+    if (puedeEditarFungibles && Array.isArray(datos.consumibles)) {
       for (const c of datos.consumibles) {
         if (!c.idLote) {
           throw new BadRequestException('Se debe especificar un lote físico real (idLote) para todos los consumibles a despachar.');
@@ -1323,7 +1346,6 @@ export class PrestamoCanastaServicio {
         itemFungible.cantidad -= cantADespachar;
         await this.util.itemsFungiblesRepo.save(itemFungible);
 
-        // Find original request in prestamos to match cantidadSolicitada and motivo
         let cantidadSolicitada = cantADespachar;
         let motivo = 'Despachado por canasta';
         let idActivoFungible = itemFungible.activo.id;
@@ -1356,23 +1378,46 @@ export class PrestamoCanastaServicio {
           motivo,
         });
       }
+
+      for (const p of prestamos) {
+        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        if (!esActivoFijo) {
+          p.estado = 'despachado';
+          await this.util.prestamosRepo.save(p);
+        }
+      }
+    } else if (puedeEditarFungibles) {
+      for (const p of prestamos) {
+        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        if (!esActivoFijo) {
+          p.estado = 'despachado';
+          await this.util.prestamosRepo.save(p);
+        }
+      }
     }
 
     const prestamosActualizados = await this.resolverPrestamosPorCanastaId(canastaId);
     const ahora = new Date();
     for (const p of prestamosActualizados) {
-      p.estado = 'despachado';
+      const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+      const isChanged = (esActivoFijo && puedeEditarFijos) || (!esActivoFijo && puedeEditarFungibles);
 
-      if (p.fechaDevolucion && p.fechaDevolucion.getTime() <= ahora.getTime()) {
-        const difOriginal = p.fechaDevolucion.getTime() - p.fechaPrestamo.getTime();
-        const duracion = difOriginal > 0 ? difOriginal : 24 * 60 * 60 * 1000;
-        p.fechaDevolucion = new Date(ahora.getTime() + duracion);
+      if (isChanged) {
+        p.estado = 'despachado';
+
+        if (p.fechaDevolucion && p.fechaDevolucion.getTime() <= ahora.getTime()) {
+          const difOriginal = p.fechaDevolucion.getTime() - p.fechaPrestamo.getTime();
+          const duracion = difOriginal > 0 ? difOriginal : 24 * 60 * 60 * 1000;
+          p.fechaDevolucion = new Date(ahora.getTime() + duracion);
+        }
+
+        p.fechaPrestamo = ahora; // Update start date/time
+        if (puedeEditarFungibles && consumiblesDespachados.length > 0) {
+          p.consumibles = consumiblesDespachados;
+        }
+        await this.util.prestamosRepo.save(p);
+        await this.util.registrarCambioHistorial(p, 'despacho', p.estado, 'Préstamo despachado.', ejecutor);
       }
-
-      p.fechaPrestamo = ahora; // Update start date/time
-      if (consumiblesDespachados.length > 0) p.consumibles = consumiblesDespachados;
-      await this.util.prestamosRepo.save(p);
-      await this.util.registrarCambioHistorial(p, 'despacho', p.estado, 'Préstamo despachado.', ejecutor);
     }
 
     const carnetsSet = new Set(datos.carnetsRetenidos ?? []);
