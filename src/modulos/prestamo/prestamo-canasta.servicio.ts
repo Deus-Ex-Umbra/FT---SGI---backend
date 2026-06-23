@@ -337,6 +337,7 @@ export class PrestamoCanastaServicio {
       .leftJoinAndSelect('itemActivo.activo', 'activo')
       .leftJoinAndSelect('activo.inventario', 'inventario')
       .leftJoinAndSelect('p.contenedor', 'contenedor')
+      .leftJoinAndSelect('p.inventario', 'inventarioPrestamo')
       .orderBy('p.fecha_prestamo', 'DESC')
       .addOrderBy('p.id', 'DESC');
 
