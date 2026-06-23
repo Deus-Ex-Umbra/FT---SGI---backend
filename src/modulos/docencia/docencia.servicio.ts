@@ -67,8 +67,8 @@ export class DocenciaServicio {
     return this.gruposServicio.rechazarSolicitudGrupo(adminUsuarioId, grupoId, motivo);
   }
 
-  async listarSubgruposPrestamo(docenteUsuarioId: number, grupoId: string) {
-    return this.subgruposServicio.listarSubgruposPrestamo(docenteUsuarioId, grupoId);
+  async listarSubgruposPrestamo(docenteUsuarioId: number, grupoId: string, rol?: string) {
+    return this.subgruposServicio.listarSubgruposPrestamo(docenteUsuarioId, grupoId, rol);
   }
 
   async crearSubgrupoPrestamo(docenteUsuarioId: number, grupoId: string, dto: {

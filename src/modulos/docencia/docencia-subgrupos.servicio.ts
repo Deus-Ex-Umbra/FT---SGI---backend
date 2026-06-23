@@ -83,8 +83,17 @@ export class DocenciaSubgruposServicio {
     }
   }
 
-  async listarSubgruposPrestamo(docenteUsuarioId: number, grupoId: string) {
-    const grupo = await this.gruposServicio.obtenerGrupoParaDocente(docenteUsuarioId, grupoId, { requiereAprobado: true });
+  async listarSubgruposPrestamo(usuarioId: number, grupoId: string, rol?: string) {
+    if (rol === 'estudiante') {
+      const estudiante = await this.repoEstudiantes.findOne({ where: { usuario: { id: usuarioId } } });
+      if (!estudiante) return [];
+      return await this.repoSubgruposPrestamo.find({
+        where: { grupoMateria: { id: grupoId }, responsableEstudianteId: estudiante.id },
+        order: { codigo: 'ASC', id: 'ASC' },
+      });
+    }
+
+    const grupo = await this.gruposServicio.obtenerGrupoParaDocente(usuarioId, grupoId, { requiereAprobado: true });
     return await this.repoSubgruposPrestamo.find({
       where: { grupoMateria: { id: grupo.id } },
       order: { codigo: 'ASC', id: 'ASC' },

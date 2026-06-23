@@ -92,11 +92,11 @@ export class DocenciaControlador {
 
   @ApiBearerAuth('JWT-auth')
   @UseGuards(JwtAutenticacionGuardia, RolesGuardia)
-  @Roles('docente' as RolUsuario)
+  @Roles('docente' as RolUsuario, 'estudiante' as RolUsuario)
   @Get('materias/:id/subgrupos')
   @ApiOperation({ summary: 'Listar subgrupos de préstamo de un grupo de materia' })
   async listarSubgrupos(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
-    return await this.servicio.listarSubgruposPrestamo(req.user.id, id);
+    return await this.servicio.listarSubgruposPrestamo(req.user.id, id, req.user.rol);
   }
 
   @ApiBearerAuth('JWT-auth')
