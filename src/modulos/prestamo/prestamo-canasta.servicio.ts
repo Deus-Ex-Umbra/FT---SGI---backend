@@ -1317,7 +1317,7 @@ export class PrestamoCanastaServicio {
       }
     } else if (puedeEditarFijos) {
       for (const p of prestamos) {
-        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        const esActivoFijo = p.codigoHerramienta !== null || (p.contenedor != null && p.contenedor?.tipo === 'fijo');
         if (esActivoFijo) {
           p.estado = 'despachado';
           if (p.itemActivo) await this.util.marcarItemEnPrestamo(p.itemActivo);
@@ -1381,7 +1381,7 @@ export class PrestamoCanastaServicio {
       }
 
       for (const p of prestamos) {
-        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        const esActivoFijo = p.codigoHerramienta !== null || (p.contenedor != null && p.contenedor?.tipo === 'fijo');
         if (!esActivoFijo) {
           p.estado = 'despachado';
           await this.util.prestamosRepo.save(p);
@@ -1389,10 +1389,21 @@ export class PrestamoCanastaServicio {
       }
     } else if (puedeEditarFungibles) {
       for (const p of prestamos) {
-        const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+        const esActivoFijo = p.codigoHerramienta !== null || (p.contenedor != null && p.contenedor?.tipo === 'fijo');
         if (!esActivoFijo) {
-          p.estado = 'despachado';
-          await this.util.prestamosRepo.save(p);
+          if (p.contenedor && p.contenedor?.tipo === 'fungible') {
+              // Limpiar placeholder de contenedor fungible
+              const existeCanastaItem = await this.canastaItemsRepo.findOne({
+                where: { grupoCanasta: grupoCanasta === null ? IsNull() : grupoCanasta, itemActivo: IsNull(), contenedor: { id: p.contenedor.id } }
+              });
+              if (existeCanastaItem) {
+                await this.canastaItemsRepo.remove(existeCanastaItem);
+              }
+              await this.util.prestamosRepo.softRemove(p);
+          } else {
+              p.estado = 'despachado';
+              await this.util.prestamosRepo.save(p);
+          }
         }
       }
     }
@@ -1400,7 +1411,7 @@ export class PrestamoCanastaServicio {
     const prestamosActualizados = await this.resolverPrestamosPorCanastaId(canastaId);
     const ahora = new Date();
     for (const p of prestamosActualizados) {
-      const esActivoFijo = p.codigoHerramienta !== null || p.contenedor !== null;
+      const esActivoFijo = p.codigoHerramienta !== null || (p.contenedor != null && p.contenedor?.tipo === 'fijo');
       const isChanged = (esActivoFijo && puedeEditarFijos) || (!esActivoFijo && puedeEditarFungibles);
 
       if (isChanged) {
