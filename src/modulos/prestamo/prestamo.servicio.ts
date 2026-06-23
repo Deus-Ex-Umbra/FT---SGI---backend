@@ -142,7 +142,7 @@ export class PrestamoServicio {
     if (!idHerramienta) throw new BadRequestException('Debes seleccionar un item.');
 
     const itemActivo = await this.util.obtenerItemActivo(idHerramienta);
-    const estadoInicial = ejecutor?.rol === 'docente' ? 'solicitado' : 'despachado';
+    const estadoInicial = ejecutor?.rol === 'docente' ? 'solicitado' : ejecutor?.rol === 'estudiante' ? 'pendiente_docente' : 'despachado';
     if (estadoInicial === 'despachado') {
       await this.util.validarDisponibilidadItem(idHerramienta, undefined, itemActivo);
     }
@@ -562,7 +562,7 @@ export class PrestamoServicio {
     if (ejecutor?.rol !== 'administrador') throw new ForbiddenException('No tienes permiso.');
     const prestamo = await this.util.prestamosRepo.findOne({
       where: { id },
-      relations: ['itemActivo', 'itemActivo.activo'],
+      relations: ['itemActivo', 'itemActivo.activo', 'contenedor'],
       withDeleted: true,
     });
     if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
@@ -572,7 +572,7 @@ export class PrestamoServicio {
     if (grupoCanasta) {
       prestamosEnCanasta = await this.util.prestamosRepo.find({
         where: { grupoCanasta },
-        relations: ['itemActivo', 'itemActivo.activo'],
+        relations: ['itemActivo', 'itemActivo.activo', 'contenedor'],
         withDeleted: true,
       });
     } else {
@@ -653,7 +653,7 @@ export class PrestamoServicio {
 
         return {
           idHerramienta: p.codigoHerramienta || '',
-          nombre: p.itemActivo?.activo?.nombre ?? 'Activo',
+          nombre: p.itemActivo?.activo?.nombre ?? p.contenedor?.nombre ?? 'Activo',
           codigo: p.itemActivo?.codigo_inventario ?? p.codigoHerramienta ?? 'Sin código',
           estado: estadoFinal,
         };
@@ -1041,8 +1041,16 @@ export class PrestamoServicio {
   async aceptarCanastaPrestamo(canastaId: string, ejecutor?: any) {
     return this.prestamoCanastaServicio.aceptarCanastaPrestamo(canastaId, ejecutor);
   }
-  async rechazarCanastaPrestamo(canastaId: string, motivo: string, ejecutor?: any) {
+  async rechazarCanastaPrestamo(canastaId: string, motivo: string, ejecutor: any) {
     return this.prestamoCanastaServicio.rechazarCanastaPrestamo(canastaId, motivo, ejecutor);
+  }
+
+  async aprobarCanastaDocente(canastaId: string, ejecutor: any) {
+    return this.prestamoCanastaServicio.aceptarCanastaDocente(canastaId, ejecutor);
+  }
+
+  async rechazarCanastaDocente(canastaId: string, motivo: string, ejecutor: any) {
+    return this.prestamoCanastaServicio.rechazarCanastaDocente(canastaId, motivo, ejecutor);
   }
   async despacharCanastaPrestamo(canastaId: string, datos: any, ejecutor?: any) {
     return this.prestamoCanastaServicio.despacharCanastaPrestamo(canastaId, datos, ejecutor);

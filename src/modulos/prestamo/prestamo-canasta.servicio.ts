@@ -216,11 +216,15 @@ export class PrestamoCanastaServicio {
           ? 'aceptado'
           : estados.includes('solicitado')
             ? 'solicitado'
-            : estados.includes('rechazado')
-              ? 'rechazado'
-              : estados.includes('devuelto_fuera_de_fecha_limite')
-                ? 'devuelto_fuera_de_fecha_limite'
-                : 'devuelto';
+            : estados.includes('pendiente_docente')
+              ? 'pendiente_docente'
+              : estados.includes('rechazado_docente')
+                ? 'rechazado_docente'
+                : estados.includes('rechazado')
+                  ? 'rechazado'
+                  : estados.includes('devuelto_fuera_de_fecha_limite')
+                    ? 'devuelto_fuera_de_fecha_limite'
+                    : 'devuelto';
 
     const detalles = detallesCanasta.length > 0 ? detallesCanasta : this.construirDetallesCanastaFallback(prestamos);
     const prestamosAsignados = new Set<number>();
@@ -474,7 +478,7 @@ export class PrestamoCanastaServicio {
       : [];
     const contenedoresMap = new Map(contenedoresDb.map(c => [c.id, c]));
 
-    const estadoInicial = ejecutor?.rol === 'docente' ? 'solicitado' : 'despachado';
+    const estadoInicial = ejecutor?.rol === 'docente' ? 'solicitado' : ejecutor?.rol === 'estudiante' ? 'pendiente_docente' : 'despachado';
     const itemsRegistrados = itemsCanasta.filter((item) => item.registrado);
 
     const timestamp = Date.now();
@@ -1143,6 +1147,52 @@ export class PrestamoCanastaServicio {
       p.motivoRechazo = limpioMotivo;
       const guardado = await this.util.prestamosRepo.save(p);
       await this.util.registrarCambioHistorial(guardado, 'rechazo', guardado.estado, `Solicitud rechazada. Motivo: ${limpioMotivo}`, ejecutor, {
+        antes: { estado: estadoAnterior, motivoRechazo: null },
+        despues: { estado: guardado.estado, motivoRechazo: limpioMotivo }
+      });
+    }
+
+    const estudiantesCanasta = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
+    const recargados = await this.resolverPrestamosPorCanastaId(canastaId);
+    const detallesCanasta = grupoCanasta ? await this.obtenerDetallesItemsCanasta(grupoCanasta) : [];
+    return this.mapCanastaDto(recargados, [], estudiantesCanasta, detallesCanasta);
+  }
+
+  async aceptarCanastaDocente(canastaId: string, ejecutor?: any) {
+    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
+    const grupoCanasta = prestamos[0].grupoCanasta ?? null;
+
+    for (const p of prestamos) {
+      if (p.estado !== 'pendiente_docente') throw new BadRequestException('El préstamo no está pendiente de aprobación por el docente.');
+      const estadoAnterior = p.estado;
+      p.estado = 'solicitado';
+      const guardado = await this.util.prestamosRepo.save(p);
+      await this.util.registrarCambioHistorial(guardado, 'aprobacion_docente', guardado.estado, 'Solicitud de estudiante aprobada por el docente.', ejecutor, {
+        antes: { estado: estadoAnterior },
+        despues: { estado: guardado.estado }
+      });
+    }
+
+    const estudiantesCanasta = grupoCanasta ? await this.obtenerEstudiantesCanasta(grupoCanasta) : [prestamos[0].estudiante];
+    const recargados = await this.resolverPrestamosPorCanastaId(canastaId);
+    const detallesCanasta = grupoCanasta ? await this.obtenerDetallesItemsCanasta(grupoCanasta) : [];
+    return this.mapCanastaDto(recargados, [], estudiantesCanasta, detallesCanasta);
+  }
+
+  async rechazarCanastaDocente(canastaId: string, motivo: string, ejecutor?: any) {
+    const limpioMotivo = String(motivo ?? '').trim();
+    if (!limpioMotivo) throw new BadRequestException('Debes proporcionar un motivo.');
+
+    const prestamos = await this.resolverPrestamosPorCanastaId(canastaId);
+    const grupoCanasta = prestamos[0].grupoCanasta ?? null;
+
+    for (const p of prestamos) {
+      if (p.estado !== 'pendiente_docente') throw new BadRequestException('El préstamo no está pendiente de aprobación por el docente.');
+      const estadoAnterior = p.estado;
+      p.estado = 'rechazado_docente';
+      p.motivoRechazo = limpioMotivo;
+      const guardado = await this.util.prestamosRepo.save(p);
+      await this.util.registrarCambioHistorial(guardado, 'rechazo_docente', guardado.estado, `Solicitud de estudiante rechazada por el docente. Motivo: ${limpioMotivo}`, ejecutor, {
         antes: { estado: estadoAnterior, motivoRechazo: null },
         despues: { estado: guardado.estado, motivoRechazo: limpioMotivo }
       });

@@ -190,6 +190,22 @@ export class PrestamoControlador {
     return this.prestamoServicio.rechazarCanastaPrestamo(canastaId, body.motivo, req.user);
   }
 
+  @Put('canastas/:id/aprobar-docente')
+  @Roles('docente' as RolUsuario)
+  async aprobarCanastaDocente(@Request() req: any, @Param('id') canastaId: string) {
+    return this.prestamoServicio.aprobarCanastaDocente(canastaId, req.user);
+  }
+
+  @Put('canastas/:id/rechazar-docente')
+  @Roles('docente' as RolUsuario)
+  async rechazarCanastaDocente(
+    @Request() req: any,
+    @Param('id') canastaId: string,
+    @Body() body: { motivo: string },
+  ) {
+    return this.prestamoServicio.rechazarCanastaDocente(canastaId, body.motivo, req.user);
+  }
+
   @Put('canastas/:id/despachar')
   async despacharCanasta(
     @Request() req: any,

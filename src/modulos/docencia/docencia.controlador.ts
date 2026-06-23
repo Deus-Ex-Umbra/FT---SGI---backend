@@ -55,6 +55,15 @@ export class DocenciaControlador {
 
   @ApiBearerAuth('JWT-auth')
   @UseGuards(JwtAutenticacionGuardia, RolesGuardia)
+  @Roles('estudiante' as RolUsuario)
+  @Get('materias-lideradas')
+  @ApiOperation({ summary: 'Listar materias donde el estudiante es líder de un subgrupo' })
+  async listarMateriasLideradas(@Request() req: any) {
+    return await this.servicio.listarMateriasLideradas(req.user.id);
+  }
+
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(JwtAutenticacionGuardia, RolesGuardia)
   @Roles('docente' as RolUsuario)
   @Post('materias')
   @ApiOperation({ summary: 'Crear materia del docente' })

@@ -91,6 +91,25 @@ export class DocenciaSubgruposServicio {
     });
   }
 
+  async listarMateriasLideradas(usuarioId: number) {
+    const estudiante = await this.repoEstudiantes.findOne({ where: { usuario: { id: usuarioId } } });
+    if (!estudiante) return [];
+
+    const subgrupos = await this.repoSubgruposPrestamo.find({
+      where: { responsableEstudianteId: estudiante.id },
+      relations: ['grupoMateria', 'grupoMateria.docenteUsuario'],
+    });
+
+    const gruposMap = new Map();
+    for (const subgrupo of subgrupos) {
+      if (!gruposMap.has(subgrupo.grupoMateria.id)) {
+        gruposMap.set(subgrupo.grupoMateria.id, subgrupo.grupoMateria);
+      }
+    }
+    
+    return await this.gruposServicio.enriquecerGruposConDocente(Array.from(gruposMap.values()));
+  }
+
   async crearSubgrupoPrestamo(docenteUsuarioId: number, grupoId: string, dto: {
     codigo: string;
     nombre?: string | null;

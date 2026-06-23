@@ -35,6 +35,10 @@ export class DocenciaServicio {
     return this.gruposServicio.listarMateriasAsignadas(docenteUsuarioId);
   }
 
+  async listarMateriasLideradas(usuarioId: number) {
+    return this.subgruposServicio.listarMateriasLideradas(usuarioId);
+  }
+
   async crearGrupo(docenteUsuarioId: number, dto: CrearGrupoMateriaDto) {
     return this.gruposServicio.crearGrupo(docenteUsuarioId, dto);
   }
